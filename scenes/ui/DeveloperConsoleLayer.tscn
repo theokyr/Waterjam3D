@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://bs30c6e10numw"]
+
+[ext_resource type="PackedScene" uid="uid://ur4nxtan8ccn" path="res://scenes/ui/DeveloperConsole.tscn" id="1_console"]
+
+[node name="DeveloperConsoleLayer" type="CanvasLayer"]
+layer = 100
+
+[node name="DeveloperConsole" parent="." instance=ExtResource("1_console")]
+visible = false

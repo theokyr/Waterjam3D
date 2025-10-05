@@ -1,0 +1,81 @@
+[gd_scene load_steps=3 format=3 uid="uid://cb70o0ou50f0v"]
+
+[ext_resource type="Script" uid="uid://6hamxyix8don" path="res://scripts/ui/MainMenu.cs" id="1_0uuqe"]
+[ext_resource type="Theme" uid="uid://bcw8fok1dm3fc" path="res://resources/ui/GlobalTheme.tres" id="7_idhqd"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_0uuqe")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.07, 0.09, 1)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MainMenuButtonsContainer" type="VBoxContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+theme = ExtResource("7_idhqd")
+theme_override_constants/separation = 15
+
+[node name="Title" type="Label" parent="CenterContainer/MainMenuButtonsContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "Waterjam 3D"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="CenterContainer/MainMenuButtonsContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 16
+text = "What the eff"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="CenterContainer/MainMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+
+[node name="NewGameButton" type="Button" parent="CenterContainer/MainMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_type_variation = &"PrimaryButton"
+text = "▶ New Game"
+
+[node name="MultiplayerButton" type="Button" parent="CenterContainer/MainMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_type_variation = &"GhostButton"
+text = "🌐 Multiplayer"
+
+[node name="OptionsButton" type="Button" parent="CenterContainer/MainMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_type_variation = &"GhostButton"
+text = "⚙️ Options"
+
+[node name="Spacer2" type="Control" parent="CenterContainer/MainMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+
+[node name="QuitButton" type="Button" parent="CenterContainer/MainMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 45)
+layout_mode = 2
+theme_type_variation = &"DangerButton"
+text = "❌ Quit"

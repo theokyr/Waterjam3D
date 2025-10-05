@@ -1,0 +1,92 @@
+---
+description: Waterjam3D Networking Documentation Guide v2
+globs:
+  - "**/*"
+alwaysApply: false
+---
+
+## Waterjam3D Networking Documentation v2
+
+**Status**: ⚠️ Experimental (opt-in)
+**Primary References**:
+- `docs_v2/systems.md` — Networking (Experimental) section
+- `docs_v2/modding.md` — Networking-Aware Mods
+- `docs_v2/extensibility.md` — Networking hooks & checklists
+
+Networking is integrated with the modular runtime and is still under active development. Treat the feature set as experimental an
+d require explicit opt-in before enabling multiplayer features in production builds.
+
+---
+
+## Key Implementation Details
+
+### Core Services
+- **NetworkService** (`scripts/game/services/NetworkService.cs`) — configures client/server mode, manages connections, and expose
+s console helpers such as `net_start_server`, `net_connect`, `net_disconnect`, and `net_status`.
+- **NetworkReplicationService** (`scripts/game/services/NetworkReplicationService.cs`) — coordinates authoritative entity spawnin
+g, replicated component registration, and per-tick replication updates.
+- **ModRpcService**, **PermissionManager**, and related helpers under `scripts/game/services/network/` surface RPC routing and p
+ermission checks to mods through `SystemContext`.
+- **NetworkEvents** (`scripts/events/NetworkEvents.cs`) capture connection lifecycle, replication ticks, and permission changes fo
+r systems/mods to subscribe to.
+
+### Manifest & Permission Integration
+- Mods that register RPC handlers or replicated components must request networking permissions in their manifest (`Permissions`
+ block) before `SystemRegistry` will expose networking services.
+- Permissions are enforced alongside the `AllowCodeMods` flag in `user://system_registry_config.json`; keep manifests and config
+uration aligned so only trusted mods can execute networked code.
+
+### Console & Runtime Workflow
+- Start a server via `net_start_server <port>` before loading networking-enabled mods.
+- Use `net_connect <host> <port>` or `net_disconnect` to manage client sessions; `net_status` reports the current role and conne
+ction health.
+- After establishing the network role, load or reload mods with `systems_load <mod-id>` / `systems_reload <mod-id>` so replicati
+on hooks activate immediately.
+
+### Integration with Systems
+- Networking hooks are optional: core gameplay systems operate offline. Ensure new systems degrade gracefully when `NetworkServ
+ice` is unavailable.
+- Coordinate with city generation events (`CityGenerationCompleteEvent`) before spawning replicated props to keep asynchronous w
+orld assembly stable.
+- Keep replication-friendly data structures deterministic and avoid per-frame allocations; leverage events and timers as descri
+bed in `docs_v2/systems.md`.
+
+---
+
+## Developer Checklist
+- Confirm the networking sections of `docs_v2/systems.md` and `docs_v2/modding.md` when touching services under `scripts/game/se
+rvices/network/` or adding network-aware mods.
+- Audit manifests for accurate `Permissions` and `Dependencies` entries; document networking capabilities in mod READMEs.
+- Validate hot reload by running `systems_reload` while connected to a server; ensure shutdown paths unregister RPC handlers and
+ event subscriptions.
+- When updating protocol or replication helpers, coordinate with testing guidance in `docs_v2/testing.md` to extend automation a
+nd integration coverage.
+
+---
+
+## Architecture Notes
+- Multiplayer follows a client/server split managed by `NetworkService`; no production readiness guarantees yet—expect iteration
+ on transport and replication.
+- Keep mods and systems defensive: check the active network role before sending RPCs, and guard asynchronous work with cancellat
+ion when sessions terminate.
+
+---
+
+## Agent Guidelines
+
+**When answering networking questions**
+1. Start with `docs_v2/systems.md` (Networking section) for architecture and lifecycle context.
+2. Consult `docs_v2/modding.md` for networking-aware permissions, RPC integration, and console workflow.
+3. Use `docs_v2/extensibility.md` for deployment checklists, guardrails, and cross-team expectations.
+4. Point to concrete files (`scripts/game/services/network/*`, `scripts/events/NetworkEvents.cs`, manifests) when citing impleme
+ntation details.
+
+**Do**
+- Emphasize the experimental status; advise feature flags or opt-in builds before shipping multiplayer content.
+- Encourage validation via console commands (`net_start_server`, `net_connect`, `net_status`, `systems_reload`).
+- Highlight manifest permission requirements and lifecycle cleanup responsibilities.
+
+**Avoid**
+- Directing contributors to deprecated `docs/networking-docs-v2/` content.
+- Promising production readiness or fixed performance metrics.
+- Enabling mods without verifying `AllowCodeMods` and manifest permissions.

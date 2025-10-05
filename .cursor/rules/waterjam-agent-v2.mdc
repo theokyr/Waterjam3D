@@ -1,0 +1,107 @@
+---
+description: Waterjam3D Development Agent Rules v2 (architecture, workflows, standards)
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+## Waterjam3D Agent Rules v2
+
+Environment
+- Windows 11; PowerShell 5.1. Build with: `dotnet build Waterjam3D.sln -c Debug`. Godot tools are also available. Console logs can be accessed at `C:\Users\theo\AppData\Roaming\Godot\app_userdata\Waterjam3D\logs\`.
+- Godot global path: `C:\\Progs\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe`
+
+Scope & Goals
+- Primary: Implement and maintain features with high-quality, readable C# for Godot 4, aligned to service-oriented, event-driven, domain-first architecture.
+- Secondary: Performance, save/load correctness, UI consistency, modularity and decoupling via typed events.
+
+Project Structure
+- Domain (`scripts/domain/`): entities, states, actions, scripting models, save.
+- Services (`scripts/game/services/`): long-lived orchestrators (game, scene, UI, save, settings, audio, world controller).
+- Systems (`scripts/game/systems/`): feature modules (dialogue, quest, simulation, city), composed under GameSystems.
+- Events (`scripts/events/`): strongly-typed messages.
+- UI (`scripts/ui/`, `scenes/ui/`): screens with global theme from `scenes/ui/UiRoot.tscn`.
+- Scenes/Resources: `scenes/`, `resources/`.
+
+Architecture
+- Event-driven: `IGameEvent`, `IGameEventHandler<T>`; use `GameEvent.DispatchGlobal`.
+- Services: inherit `BaseService`, thin orchestration, initialize in `_Ready()`.
+- Systems: encapsulate feature logic; integrate via events; console commands where useful.
+- Domain-first: keep domain free of UI/scene paths; inject via events/services.
+- Scene orchestration: `SceneService` loads/unloads, preserves `UiRoot` and `GameSystems`.
+
+Coding Standards
+- Readability first; no 1–2 letter identifiers.
+- Public APIs/Exported members explicitly typed.
+- Guard clauses; avoid deep nesting.
+- Log errors instead of throwing across event boundaries.
+- Godot specifics: avoid heavy work in `_Process`/`_PhysicsProcess`; prefer timers/queued work. Validate node paths and scene instantiation.
+
+Performance
+- Time-slice, LOD, pooling; minimize GC in hot paths; batch operations.
+- UI: theme-driven, avoid per-frame text updates.
+
+Event System Usage
+- Group events by domain; minimal payloads.
+- Use ordering attributes sparingly; document rationale.
+
+Save System
+- `ISaveable` round-trips; version and migrate on schema change; never silently drop fields.
+
+Domain
+- Entities inherit from `Entity`; states via `StateMachineComponent`; actions implement `IAction` with `CanExecute` guards.
+- Scripting via `ScriptEngine`; register functions explicitly; isolate contexts; log errors.
+
+Systems Guidance
+- Quest: integrates with `FactsService`; `.quest` → JSON via transpiler; ensure `completeObjective` last; use dialogue tree IDs; enable NPC distance cleanup; validate references.
+- Dialogue: tree-based with `node start`; ensure testable branches; localization-ready.
+- Simulation: compose managers (Entity, Navigation, Spawn, Pool, Event); respect budgets; pool aggressively.
+- Console: add diagnostics commands; use `ConsoleChannel` appropriately.
+
+Feature Workflows
+- New Service: add in `scripts/game/services/`, `_Ready()` init, typed events, thin orchestration.
+- New System: under `scripts/game/systems/<feature>/`, integrate via events, add manifest for modular runtime.
+- New Entity/State/Action: under domain; keep UI/scene-free; add prefabs in `scenes/` as needed.
+- New Quest: author `.quest` → transpile to JSON in `resources/scripts/quests/`; validate NPCs/objectives/scripts.
+- New UI Screen: `scenes/ui/` + `scripts/ui/`, integrate with `UiService`, follow theme and accessibility.
+
+Testing & Tooling
+- Build & run; fix compiler/linter issues.
+- Use Console for runtime checks and counters.
+- `tests/Waterjam3D.Tests` for pure logic; `scripts/tests/` Godot harness (`run_tests`); `tools/quest-transpiler` Jest.
+
+PR/Commit Guidelines
+- Small, focused edits with rationale; separate commits per concern.
+
+Quality Gates
+- No hard cross-system refs; no blocking main thread; preserve save/load or migrate.
+
+Pitfalls to Avoid
+- Missing `completeObjective` at end of scripts.
+- Using dialogue node IDs instead of dialogue tree IDs.
+- Per-frame scans instead of timers/events.
+- Bypassing `SceneService`/`UiService` paths.
+
+Sanity Checklist
+- Typed events wired? Services thin? No hot-path allocations? UI respects theme? Save/load round-trips? Docs updated?
+
+Godot MCP Tools
+- Purpose: use MCP tools to automate editor/project control non-interactively during development.
+- Project path: `C:\Projects\Godot\Waterjam3D-game` (use project-relative `res://` for resources).
+- Launch editor: `mcp_godot_launch_editor(projectPath)`.
+- Run project: `mcp_godot_run_project(projectPath, scene?)` (use `scene` for specific scenes like `res://scenes/dev/dev.tscn`).
+- Read debug output: `mcp_godot_get_debug_output()`; logs also at `C:\Users\theo\AppData\Roaming\Godot\app_userdata\Waterjam3D\logs\`.
+- Stop running project: `mcp_godot_stop_project()` before starting another run.
+- Inspect environment: `mcp_godot_get_godot_version()`, `mcp_godot_list_projects(directory)`, `mcp_godot_get_project_info(projectPath)`.
+- Scene authoring helpers: `mcp_godot_create_scene(projectPath, scenePath, rootNodeType)`, `mcp_godot_add_node(projectPath, scenePath, parentNodePath, nodeType, nodeName)`, `mcp_godot_load_sprite(projectPath, scenePath, nodePath, texturePath)`, `mcp_godot_save_scene(projectPath, scenePath, newPath?)`.
+- Assets & UIDs: `mcp_godot_get_uid(projectPath, filePath)`, `mcp_godot_update_project_uids(projectPath)`; exporting: `mcp_godot_export_mesh_library(projectPath, scenePath, outputPath)`.
+- Usage rules: background long runs; stop before re-run; avoid per-frame debug pulls; prefer `scenes/dev/dev.tscn` or `scenes/dev/dev_city.tscn` for sandboxing; build with `dotnet build Waterjam3D.sln -c Debug` when C# changed.
+- Safety: never perform destructive scene/file ops without VCS checkpoint; validate node types; keep asset paths relative; respect UI theme conventions when modifying UI scenes.
+
+Console commands via MCP
+- Send console command: `mcp_godot_send_console_command(projectPath, command, fallbackRun?, scene?)`.
+- If the project is running, the tool writes to `user://mcp/inbox` and `ConsoleSystem` executes it within ~0.5s.
+- If not running and `fallbackRun` is true (default), the project starts with `+<command>` so it executes at startup.
+- Manual drop (no tool): write a text file with the command to `%APPDATA%\Godot\app_userdata\Waterjam3D\mcp\inbox`.
+- Check output: prefer `mcp_godot_get_debug_output()` while running; or read latest log in `C:\Users\theo\AppData\Roaming\Godot\app_userdata\Waterjam3D\logs\`.
+

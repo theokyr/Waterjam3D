@@ -1,0 +1,81 @@
+[gd_scene load_steps=3 format=3 uid="uid://dy3ppvuy1u8sy"]
+
+[ext_resource type="Script" uid="uid://jmstdqa1ut4t" path="res://scripts/ui/PauseMenu.cs" id="1_pause"]
+[ext_resource type="Theme" uid="uid://bcw8fok1dm3fc" path="res://resources/ui/GlobalTheme.tres" id="2_theme"]
+
+[node name="PauseMenu" type="Control"]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_pause")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.5)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PausePanel" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(450, 0)
+layout_mode = 2
+theme = ExtResource("2_theme")
+theme_type_variation = &"CardPanel"
+
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/PausePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 30
+
+[node name="PauseMenuButtonsContainer" type="VBoxContainer" parent="CenterContainer/PausePanel/MarginContainer"]
+layout_mode = 2
+theme = ExtResource("2_theme")
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="CenterContainer/PausePanel/MarginContainer/PauseMenuButtonsContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "⏸️ GAME PAUSED"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="CenterContainer/PausePanel/MarginContainer/PauseMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+
+[node name="ResumeButton" type="Button" parent="CenterContainer/PausePanel/MarginContainer/PauseMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_type_variation = &"PrimaryButton"
+text = "▶ Resume Game"
+
+[node name="OptionsButton" type="Button" parent="CenterContainer/PausePanel/MarginContainer/PauseMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_type_variation = &"GhostButton"
+text = "⚙️ Options"
+
+[node name="Spacer2" type="Control" parent="CenterContainer/PausePanel/MarginContainer/PauseMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+
+[node name="QuitButton" type="Button" parent="CenterContainer/PausePanel/MarginContainer/PauseMenuButtonsContainer"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_type_variation = &"DangerButton"
+text = "❌ Quit to Desktop"

@@ -1,0 +1,34 @@
+---
+description: Waterjam3D Coding Standards & Style v2
+globs:
+  - "scripts/**/*"
+  - "tests/**/*"
+alwaysApply: true
+---
+
+## Coding Standards & Style v2
+
+Naming
+- Functions: verbs/verb-phrases; variables: meaningful nouns; avoid abbreviations.
+- Public APIs and exported members explicitly typed.
+
+Types & Safety
+- Prefer strong typing; avoid object/dynamic loosening.
+- No unchecked casts; validate inputs and guard early.
+
+Control Flow
+- Guard clauses over deep nesting; handle errors first.
+- Do not swallow exceptions; log via ConsoleSystem with appropriate channel.
+
+Comments & Formatting
+- Short "why" comments for complex logic; avoid inline chatter.
+- Match existing formatting; wrap long lines; avoid unrelated reformatting.
+
+Performance Style
+- Avoid per-frame allocations; time-slice work; reuse buffers.
+- LINQ OK for clarity outside hot paths; avoid in tight loops.
+
+Testing
+- Unit tests for pure domain logic in tests/Waterjam3D.Tests (NUnit).
+- Integration tests via Godot harness under scripts/tests/suites.
+

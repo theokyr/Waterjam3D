@@ -1,0 +1,46 @@
+---
+description: Waterjam3D Systems & Modular Runtime Rules v2
+globs:
+  - "scripts/game/systems/**/*"
+  - "scripts/game/services/modular/**/*"
+  - "systems/manifests/**/*"
+alwaysApply: true
+---
+
+## Systems & Modular Runtime Rules v2
+
+Scope
+- scripts/game/systems/** and modular infrastructure under scripts/game/services/modular/**
+- Documentation source: `docs_v2/systems.md` (Core Gameplay Systems) and `docs_v2/modding.md` (Modding & Modular Runtime).
+
+Modular Infrastructure
+- Systems implement `IGameSystem` (or derive `ModularGameSystem`) with lifecycle: `OnInitializeAsync`/`OnShutdownAsync`/`CanUnload`.
+- Declare `Dependencies`, `OptionalDependencies`, and semantic `Version` metadata in manifests.
+- `SystemRegistry` merges manifests from `res://systems/manifests/` and user `mods/**/(systems|manifests)/`.
+- Observe `AllowCodeMods` and allow/deny lists from `user://system_registry_config.json` before loading external assemblies.
+- Use developer console commands (`systems`, `systems_load`, `systems_unload`, `systems_reload`, `systems_status`) for control & diagnostics.
+
+Authoring Systems
+- Keep feature logic self-contained and event-driven.
+- No direct references to other systems; request via context or events.
+- Provide diagnostics (timers, counters) without per-frame spam.
+- Register events and console commands during initialization, and tear them down during shutdown to support hot reload.
+- For city generation extensions, listen for `CityGenerationCompleteEvent` to avoid blocking threaded generation.
+
+Manifests Best Practices
+- Include: `SystemId`, `DisplayName`, `Description`, `Category`, `Version`, entry point (`EntryPoint` for code mods or scene/script paths), `Dependencies`, `OptionalDependencies`, `Assets`/`Scenes`, default configuration, tags, author, hot reload support, performance notes, and manifest schema version when applicable.
+- Validate paths; keep IDs stable; version bump on breaking changes.
+- Resource additions (scenes, assets) should live under the mod or `res://systems/...` and be referenced via manifest arrays.
+
+Mods
+- Mods can override manifests by systemId; log overrides.
+- Resource-only mods preferred; code mods require explicit user consent.
+- Keep assets under mod root; no absolute paths or external IO.
+- Share networking or replication capabilities only after checking permissions surfaced in manifest and `SystemContext`.
+
+Agent Checklist
+- Does the system declare everything in manifest? Avoid hidden deps.
+- Start/stop logic guards against double-init/double-stop.
+- No heavy work per frame; prefer timers or batched updates.
+- Are networking hooks, city integrations, or SceneService injections documented and gated behind manifest permissions?
+

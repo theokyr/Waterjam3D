@@ -1,0 +1,91 @@
+---
+description: Waterjam3D Event/Service/System Patterns
+globs:
+  - "**/*"
+alwaysApply: false
+---
+
+## Patterns (Essentials)
+
+### Event-driven
+- Define events under `scripts/events/**`; dispatch via `GameEvent.DispatchGlobal`.
+- Handlers: implement `IGameEventHandler<T>`; do not throw across boundaries; log errors.
+- Ordering attributes exist (Early/Late/Before/After); use only when needed and document rationale.
+
+### Services
+- Derive from `BaseService`; init in `_Ready()`, cleanup in `_ExitTree()` when needed.
+- Thin orchestration; register/unregister handlers; push logic to domain.
+
+### Systems
+- Feature modules under `scripts/game/systems/**`; no hard cross-refs (use events).
+- Provide console commands where relevant; avoid per-frame spam.
+
+### Domain
+- Entities/states/actions in `scripts/domain/**` without UI/scene deps.
+- Actions: `IAction` with `CanExecute` guard; state machines hierarchical and reversible.
+
+### Scripting
+- `ScriptEngine` executes async; register explicit functions; keep contexts isolated.
+
+### Performance
+- Time-slice, distance LOD, pooling, batching; avoid per-frame allocations and UI text churn.
+
+### Testing
+- Unit: `tests/Waterjam3D.Tests` (pure logic) via `dotnet test`.
+- Godot harness: `scripts/tests/**`, console `run_tests`.
+- Transpiler: `tools/quest-transpiler`, `npx jest --runInBand`.
+
+### Anti-patterns
+- Direct cross-system references; heavy work in event handlers; per-frame dependency scans.
+
+### References
+- UI theme/root: `scenes/ui/UiRoot.tscn`, `resources/ui/GlobalTheme.tres`.
+
+---
+description: Waterjam3D Event/Service/System Patterns
+globs:
+  - "scripts/events/**/*.cs"
+  - "scripts/game/services/**/*.cs"
+  - "scripts/game/systems/**/*.cs"
+  - "scripts/domain/**/*.cs"
+  - "scripts/tests/**/*.cs"
+alwaysApply: false
+---
+
+## Patterns (Essentials)
+
+### Event-driven
+- Define events under `scripts/events/**`; dispatch via `GameEvent.DispatchGlobal`.
+- Handlers: implement `IGameEventHandler<T>`; do not throw across boundaries; log errors.
+- Ordering attributes exist (`HandlerPriority`, `HandlerOrder`); use only when needed.
+
+### Services
+- Derive from `BaseService`; init in `_Ready()`, cleanup in `_ExitTree()`.
+- Thin orchestration; register/unregister handlers; push logic to domain.
+
+### Systems
+- Feature modules under `scripts/game/systems/**`; no hard cross-refs (use events).
+- Provide console commands where relevant.
+
+### Domain
+- Entities/states/actions in `scripts/domain/**` without UI/scene deps.
+- Actions: `IAction` with `CanExecute` guard; state machines hierarchical and reversible.
+
+### Scripting
+- `ScriptEngine` executes async; register explicit functions; keep contexts isolated.
+
+### Performance
+- Time-slice, distance LOD, pooling, batching; avoid per-frame allocations and UI text churn.
+
+### Testing
+- Unit: `tests/Waterjam3D.Tests` (pure logic) via `dotnet test`.
+- Godot harness: `scripts/tests/**`, console `run_tests`.
+- Transpiler: `tools/quest-transpiler`, `npx jest --runInBand`.
+
+### Anti-patterns
+- Direct cross-system references; heavy work in event handlers; per-frame dependency scans.
+
+### References
+- UI theme/root: `scenes/ui/UiRoot.tscn`, `resources/ui/GlobalTheme.tres`
+
+ 

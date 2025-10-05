@@ -1,0 +1,28 @@
+---
+description: Waterjam3D Events & Messaging Rules v2
+globs:
+  - "scripts/events/**/*"
+  - "**/*.cs"
+alwaysApply: true
+---
+
+## Events & Messaging Rules v2
+
+Scope
+- scripts/events/** and event usage across layers.
+
+Rules
+- Define typed records: public record XEvent(...) : IGameEvent.
+- Handlers implement IGameEventHandler<T> with OnGameEvent(T args).
+- Prefer GameEvent.DispatchGlobal for cross-tree communication.
+- Use ordering attributes (Early/Late/Before/After) sparingly and document rationale.
+- Isolate errors inside handlers; never let exceptions bubble across boundaries.
+
+Testing
+- Integration harness under scripts/tests/suites covers event flows and ordering.
+
+Agent Checklist
+- New events properly grouped and named; payload minimal and typed.
+- Handlers registered by being nodes in the scene tree (or autoloads).
+- Logging channels appropriate to domain (Game, World, Quest, etc.).
+

@@ -1,0 +1,33 @@
+---
+description: Waterjam3D Domain Layer Rules v2
+globs:
+  - "scripts/domain/**/*"
+  - "tests/Waterjam3D.Tests/**/*"
+alwaysApply: true
+---
+
+## Domain Layer Rules v2
+
+Scope
+- scripts/domain/**: entities, actions, states, scripting models, save contracts.
+
+Rules
+- Pure logic; no scene paths, no UI, no direct Godot node lookups.
+- Entities inherit from Entity; implement ISaveable if persistent.
+- States use StateMachineComponent (hierarchical allowed). Prefer multiple compatible active states over complex monoliths.
+- Actions implement IAction; validate with CanExecute before Execute.
+- Scripting integrates via ScriptEngine models; register functions explicitly in engine (not in domain).
+
+Save & Versioning
+- Add version fields on persisted models.
+- When changing schema: add migration path; ensure round-trip via tests.
+
+Performance
+- No allocations in tight loops; reuse buffers.
+- Avoid using LINQ on hot paths in domain; prefer for clarity in cold paths only.
+
+Agent Checklist
+- No UI/services references.
+- Types explicit and strongly-typed.
+- Tests added/updated in tests/Waterjam3D.Tests for pure logic.
+

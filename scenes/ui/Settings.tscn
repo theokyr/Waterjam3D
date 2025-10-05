@@ -1,0 +1,533 @@
+[gd_scene load_steps=3 format=3 uid="uid://gm7v7apejdjt"]
+
+[ext_resource type="Script" uid="uid://tcxst053wvss" path="res://scripts/ui/Settings.cs" id="1_script"]
+[ext_resource type="Theme" uid="uid://bcw8fok1dm3fc" path="res://resources/ui/GlobalTheme.tres" id="2_theme"]
+
+[node name="Settings" type="PanelContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+theme_type_variation = &"CardPanel"
+script = ExtResource("1_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="Content" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="Title" type="Label" parent="MarginContainer/Content"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+theme_override_font_sizes/font_size = 32
+text = "⚙️ Settings"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/Content"]
+layout_mode = 2
+
+[node name="TabContainer" type="TabContainer" parent="MarginContainer/Content"]
+layout_mode = 2
+size_flags_vertical = 3
+current_tab = 0
+clip_tabs = false
+
+[node name="Game" type="ScrollContainer" parent="MarginContainer/Content/TabContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+metadata/_tab_index = 0
+
+[node name="GameSettings" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Game"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="DifficultySection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Game/GameSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Game/GameSettings/DifficultySection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Difficulty"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Game/GameSettings/DifficultySection"]
+layout_mode = 2
+columns = 2
+
+[node name="DifficultyLabel" type="Label" parent="MarginContainer/Content/TabContainer/Game/GameSettings/DifficultySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Game Difficulty:"
+
+[node name="DifficultyOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Game/GameSettings/DifficultySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 4
+popup/item_0/text = "Easy"
+popup/item_0/id = 0
+popup/item_1/text = "Normal"
+popup/item_1/id = 1
+popup/item_2/text = "Hard"
+popup/item_2/id = 2
+popup/item_3/text = "Expert"
+popup/item_3/id = 3
+
+[node name="UiSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Game/GameSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Game/GameSettings/UiSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "UI"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Game/GameSettings/UiSection"]
+layout_mode = 2
+columns = 2
+
+[node name="HudVariantLabel" type="Label" parent="MarginContainer/Content/TabContainer/Game/GameSettings/UiSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "HUD Variant:"
+
+[node name="HudVariantOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Game/GameSettings/UiSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ScanlinesIntensityLabel" type="Label" parent="MarginContainer/Content/TabContainer/Game/GameSettings/UiSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Scanlines Intensity:"
+
+[node name="ScanlinesIntensitySlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Game/GameSettings/UiSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 0.3
+step = 0.005
+value = 0.06
+
+[node name="Video" type="ScrollContainer" parent="MarginContainer/Content/TabContainer"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+metadata/_tab_index = 1
+
+[node name="VideoSettings" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Video"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="PresetSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Graphics Quality Preset"
+horizontal_alignment = 1
+
+[node name="Presets" type="HBoxContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection"]
+layout_mode = 2
+
+[node name="VeryLowPreset" type="Button" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection/Presets"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"GhostButton"
+text = "Very Low"
+
+[node name="LowPreset" type="Button" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection/Presets"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"GhostButton"
+text = "Low"
+
+[node name="MediumPreset" type="Button" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection/Presets"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"GhostButton"
+text = "Medium"
+
+[node name="HighPreset" type="Button" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection/Presets"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"GhostButton"
+text = "High"
+
+[node name="UltraPreset" type="Button" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/PresetSection/Presets"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"GhostButton"
+text = "Ultra"
+
+[node name="DisplaySection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Display"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection"]
+layout_mode = 2
+columns = 2
+
+[node name="ResolutionLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Resolution:"
+
+[node name="ResolutionOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DisplayModeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Display Mode:"
+
+[node name="DisplayModeOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 3
+popup/item_0/text = "Windowed"
+popup/item_0/id = 0
+popup/item_1/text = "Fullscreen"
+popup/item_1/id = 1
+popup/item_2/text = "Exclusive Fullscreen"
+popup/item_2/id = 2
+
+[node name="VSyncLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "VSync:"
+
+[node name="VSyncOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/DisplaySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 3
+popup/item_0/text = "Disabled"
+popup/item_0/id = 0
+popup/item_1/text = "Adaptive"
+popup/item_1/id = 1
+popup/item_2/text = "Enabled"
+popup/item_2/id = 2
+
+[node name="QualitySection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Quality"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection"]
+layout_mode = 2
+columns = 2
+
+[node name="ShadowQualityLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Shadow Quality:"
+
+[node name="ShadowQualityOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 6
+popup/item_0/text = "Minimum (Fastest)"
+popup/item_0/id = 0
+popup/item_1/text = "Very Low"
+popup/item_1/id = 1
+popup/item_2/text = "Low"
+popup/item_2/id = 2
+popup/item_3/text = "Medium"
+popup/item_3/id = 3
+popup/item_4/text = "High"
+popup/item_4/id = 4
+popup/item_5/text = "Ultra"
+popup/item_5/id = 5
+
+[node name="ModelQualityLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Model Quality:"
+
+[node name="ModelQualityOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 4
+popup/item_0/text = "Low"
+popup/item_0/id = 0
+popup/item_1/text = "Medium"
+popup/item_1/id = 1
+popup/item_2/text = "High"
+popup/item_2/id = 2
+popup/item_3/text = "Ultra"
+popup/item_3/id = 3
+
+[node name="AntiAliasingLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Anti-Aliasing:"
+
+[node name="AntiAliasingOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/QualitySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 5
+popup/item_0/text = "Off"
+popup/item_0/id = 0
+popup/item_1/text = "TAA"
+popup/item_1/id = 1
+popup/item_2/text = "MSAA 2x"
+popup/item_2/id = 2
+popup/item_3/text = "MSAA 4x"
+popup/item_3/id = 3
+popup/item_4/text = "MSAA 8x"
+popup/item_4/id = 4
+
+[node name="EffectsSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/EffectsSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Effects"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/EffectsSection"]
+layout_mode = 2
+columns = 2
+
+[node name="BloomLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/EffectsSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Bloom:"
+
+[node name="BloomOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/EffectsSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 3
+popup/item_0/text = "Off"
+popup/item_0/id = 0
+popup/item_1/text = "Low"
+popup/item_1/id = 1
+popup/item_2/text = "High"
+popup/item_2/id = 2
+
+[node name="SSAOLabel" type="Label" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/EffectsSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Ambient Occlusion:"
+
+[node name="SSAOOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Video/VideoSettings/EffectsSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 4
+popup/item_0/text = "Off"
+popup/item_0/id = 0
+popup/item_1/text = "Low"
+popup/item_1/id = 1
+popup/item_2/text = "Medium"
+popup/item_2/id = 2
+popup/item_3/text = "High"
+popup/item_3/id = 3
+
+[node name="Sound" type="ScrollContainer" parent="MarginContainer/Content/TabContainer"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+metadata/_tab_index = 2
+
+[node name="SoundSettings" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Sound"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="VolumeSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Volume"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection"]
+layout_mode = 2
+columns = 2
+
+[node name="MasterVolumeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Master Volume:"
+
+[node name="MasterVolumeSlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="MusicVolumeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Music Volume:"
+
+[node name="MusicVolumeSlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 0.8
+
+[node name="SFXVolumeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "SFX Volume:"
+
+[node name="SFXVolumeSlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Sound/SoundSettings/VolumeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 0.7
+
+[node name="Controls" type="ScrollContainer" parent="MarginContainer/Content/TabContainer"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+metadata/_tab_index = 3
+
+[node name="ControlSettings" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Controls"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="MouseSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings/MouseSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Mouse Settings"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings/MouseSection"]
+layout_mode = 2
+columns = 2
+
+[node name="MouseSensitivityLabel" type="Label" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings/MouseSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Mouse Sensitivity:"
+
+[node name="MouseSensitivitySlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings/MouseSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.1
+max_value = 5.0
+step = 0.1
+value = 1.0
+
+[node name="InvertYLabel" type="Label" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings/MouseSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Invert Y-Axis:"
+
+[node name="InvertYCheckBox" type="CheckBox" parent="MarginContainer/Content/TabContainer/Controls/ControlSettings/MouseSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+
+[node name="Accessibility" type="ScrollContainer" parent="MarginContainer/Content/TabContainer"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+metadata/_tab_index = 4
+
+[node name="AccessibilitySettings" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Accessibility"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="VisualsSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Visual Settings"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection"]
+layout_mode = 2
+columns = 2
+
+[node name="ReduceFlashingLabel" type="Label" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reduce Flashing Effects:"
+
+[node name="ReduceFlashingCheckBox" type="CheckBox" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+
+[node name="ReduceMotionLabel" type="Label" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reduce Motion:"
+
+[node name="ReduceMotionCheckBox" type="CheckBox" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+
+[node name="HighContrastLabel" type="Label" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "High Contrast Mode:"
+
+[node name="HighContrastCheckBox" type="CheckBox" parent="MarginContainer/Content/TabContainer/Accessibility/AccessibilitySettings/VisualsSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+
+[node name="HSeparator2" type="HSeparator" parent="MarginContainer/Content"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="MarginContainer/Content"]
+custom_minimum_size = Vector2(140, 42)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"GhostButton"
+text = "⬅ Back"

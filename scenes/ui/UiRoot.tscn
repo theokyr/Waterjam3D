@@ -1,0 +1,24 @@
+[gd_scene load_steps=5 format=3 uid="uid://vqnrlu7cfrk3"]
+
+[ext_resource type="PackedScene" uid="uid://dy3ppvuy1u8sy" path="res://scenes/ui/PauseMenu.tscn" id="3_pause"]
+[ext_resource type="PackedScene" uid="uid://bs30c6e10numw" path="res://scenes/ui/DeveloperConsoleLayer.tscn" id="7_console_layer"]
+[ext_resource type="PackedScene" uid="uid://b2yqwn8xgfvvx" path="res://scenes/ui/LoadingScreen.tscn" id="8_loading"]
+[ext_resource type="Theme" uid="uid://bcw8fok1dm3fc" path="res://resources/ui/GlobalTheme.tres" id="9_theme"]
+
+[node name="UiRoot" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("9_theme")
+
+[node name="PauseMenu" parent="." instance=ExtResource("3_pause")]
+layout_mode = 1
+
+[node name="LoadingScreen" parent="." instance=ExtResource("8_loading")]
+visible = false
+layout_mode = 1
+
+[node name="DeveloperConsoleLayer" parent="." instance=ExtResource("7_console_layer")]

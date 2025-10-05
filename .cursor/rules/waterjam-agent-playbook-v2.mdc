@@ -1,0 +1,37 @@
+---
+description: Waterjam3D Agent Playbook v2 (role-specific checklists)
+globs:
+  - "**/*"
+alwaysApply: false
+---
+
+## Agent Playbook v2
+
+Architecture Agent
+- Verify layer boundaries (domain/services/systems/ui).
+- Encourage event-driven interactions; remove direct cross-node calls.
+- Ensure manifests declare dependencies; avoid hidden coupling.
+
+Domain Agent
+- Keep code pure; no scene/UI references.
+- Add/maintain versioning for persisted models; write unit tests.
+
+Services Agent
+- Keep services thin; orchestrate via typed events; use SceneService/UiService.
+- Register ConsoleSystem commands with clear usage.
+
+Systems/Modular Agent
+- Implement IGameSystem lifecycle; no heavy _Process.
+- Write/validate manifests; add metrics/diagnostics via timers.
+
+Events Agent
+- Define typed events; minimal payload; use ordering attributes only when needed.
+- Add integration tests for critical flows.
+
+UI Agent
+- Apply global theme; container-first layouts; ensure input focus.
+- Avoid per-frame UI updates; batch/debounce.
+
+Performance Agent
+- Identify hot paths; remove allocations; time-slice; pool objects.
+

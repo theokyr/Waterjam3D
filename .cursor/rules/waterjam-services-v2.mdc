@@ -1,0 +1,28 @@
+---
+description: Waterjam3D Services Rules v2
+globs:
+  - "scripts/game/services/**/*"
+alwaysApply: true
+---
+
+## Services Rules v2
+
+Scope
+- scripts/game/services/** (GameService, SceneService, UiService, SoundService, Save, Settings, WorldController, Facts).
+
+Rules
+- Inherit BaseService. Initialize in _Ready().
+- Orchestrate lifecycle; do not embed domain-heavy logic.
+- Communicate via typed events; no direct calls into systems by node paths.
+- Respect protected roots on scene transitions; delegate spawns to events.
+- FactsService: typed getters; emit FactChangedEvent on changes; cache sensibly.
+
+Console & Diagnostics
+- Register commands where relevant; keep descriptions and usage clear.
+- Log via ConsoleSystem.Log/LogWarn/LogErr with appropriate channels.
+
+Agent Checklist
+- Thin orchestration? If not, move logic down to domain/system.
+- Events emitted/handled are typed and minimal.
+- Scene switching uses SceneService; no manual root tampering.
+
