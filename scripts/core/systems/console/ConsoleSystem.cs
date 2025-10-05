@@ -6,6 +6,7 @@ using Waterjam.Events;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using FileAccess = Godot.FileAccess;
 
 #pragma warning disable CS1998
 
@@ -175,7 +176,7 @@ public partial class ConsoleSystem : Node,
         // Map loading command: `map <scene_path>` e.g., map res://scenes/dev/dev_citygen.tscn
         RegisterCommand(new ConsoleCommand(
             "map",
-            "Loads a scene by path. Usage: map <res://path/to/scene.tscn>",
+            "Loads a scene by path. Usage: map <res://path/to/scene.tscn> (accepts /dev/*.tscn)",
             "map res://scenes/dev/dev_citygen.tscn",
             async args =>
             {
@@ -185,12 +186,30 @@ public partial class ConsoleSystem : Node,
                     return false;
                 }
 
-                var scenePath = args[0];
+                var scenePath = (args[0] ?? string.Empty).Trim();
+
+                // Normalize shorthand like /dev/dev.tscn to res://scenes/dev/dev.tscn
+                if (scenePath.StartsWith("/"))
+                    scenePath = "res://scenes" + scenePath;
+
+                // If no scheme provided, assume res://
+                if (!scenePath.StartsWith("res://", StringComparison.OrdinalIgnoreCase))
+                    scenePath = "res://" + scenePath.TrimStart('/');
+
+                // Ensure .tscn extension
                 if (!scenePath.EndsWith(".tscn", StringComparison.OrdinalIgnoreCase))
+                    scenePath += ".tscn";
+
+                // Validate file exists
+                try
                 {
-                    Log("Invalid scene path. Must be a .tscn file.", ConsoleChannel.Error);
-                    return false;
+                    if (!FileAccess.FileExists(scenePath))
+                    {
+                        Log($"Scene not found: {scenePath}", ConsoleChannel.Error);
+                        return false;
+                    }
                 }
+                catch { /* best-effort */ }
 
                 GameEvent.DispatchGlobal(new SceneLoadRequestedEvent(scenePath));
                 return true;

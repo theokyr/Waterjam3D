@@ -60,6 +60,8 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
         OnButtonPressed();
         // Load dev scene per request
         GameEvent.DispatchGlobal(new SceneLoadRequestedEvent("res://scenes/dev/dev.tscn"));
+        // Hide self to reveal scene immediately
+        CallDeferred(Node.MethodName.QueueFree);
     }
 
     private void OnOptionsButtonPressed()
