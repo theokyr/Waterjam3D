@@ -37,66 +37,91 @@ public partial class PlatformService : BaseService
             }
             else
             {
-                // Determine App ID from ProjectSettings, fallback to 480 (Spacewar)
+                // Determine App ID and auto-init flags from ProjectSettings, fallback to defaults
                 uint appId = 480;
+                bool autoInit = false;
                 try
                 {
-                    if (ProjectSettings.HasSetting("steam/app_id"))
+                    // New-style key
+                    if (ProjectSettings.HasSetting("steam/initialization/app_id"))
                     {
-                        var v = ProjectSettings.GetSetting("steam/app_id");
-                        var s = v.ToString();
+                        var s = ProjectSettings.GetSetting("steam/initialization/app_id").ToString();
                         if (!string.IsNullOrEmpty(s) && uint.TryParse(s.Trim(), out var parsed))
                         {
                             appId = parsed;
+                        }
+                    }
+                    // Legacy key
+                    else if (ProjectSettings.HasSetting("steam/app_id"))
+                    {
+                        var s = ProjectSettings.GetSetting("steam/app_id").ToString();
+                        if (!string.IsNullOrEmpty(s) && uint.TryParse(s.Trim(), out var parsed))
+                        {
+                            appId = parsed;
+                        }
+                    }
+
+                    if (ProjectSettings.HasSetting("steam/initialization/initialize_on_startup"))
+                    {
+                        var s = ProjectSettings.GetSetting("steam/initialization/initialize_on_startup").ToString();
+                        if (!string.IsNullOrEmpty(s) && bool.TryParse(s.Trim(), out var b))
+                        {
+                            autoInit = b;
                         }
                     }
                 }
                 catch { }
 
                 // Optional: comply with Steam bootstrap in shipped builds
-                try
+                if (!autoInit)
                 {
-                    var needsRestart = Steam.RestartAppIfNecessary(appId);
-                    ConsoleSystem.Log($"Steam.RestartAppIfNecessary({appId}) => {needsRestart}", ConsoleChannel.Game);
-                    if (needsRestart && !Engine.IsEditorHint())
+                    try
                     {
-                        ConsoleSystem.LogWarn("Restart requested by Steam; quitting to relaunch under Steam.", ConsoleChannel.Game);
-                        GetTree().Quit();
-                        return;
+                        var needsRestart = Steam.RestartAppIfNecessary(appId);
+                        ConsoleSystem.Log($"Steam.RestartAppIfNecessary({appId}) => {needsRestart}", ConsoleChannel.Game);
+                        if (needsRestart && !Engine.IsEditorHint())
+                        {
+                            ConsoleSystem.LogWarn("Restart requested by Steam; quitting to relaunch under Steam.", ConsoleChannel.Game);
+                            GetTree().Quit();
+                            return;
+                        }
                     }
-                }
-                catch (Exception restartEx)
-                {
-                    ConsoleSystem.LogWarn($"RestartAppIfNecessary failed: {restartEx.Message}", ConsoleChannel.Game);
+                    catch (Exception restartEx)
+                    {
+                        ConsoleSystem.LogWarn($"RestartAppIfNecessary failed: {restartEx.Message}", ConsoleChannel.Game);
+                    }
                 }
 
                 ConsoleSystem.Log($"Steam.IsSteamRunning() => {Steam.IsSteamRunning()}", ConsoleChannel.Game);
 
-                SteamInitStatus status;
+                SteamInitStatus status = SteamInitStatus.SteamworksFailedToInitialize;
                 string verbal = string.Empty;
 
-                try
+                if (!autoInit)
                 {
-                    var init = Steam.SteamInit(true);
-                    status = init.Status;
-                    verbal = init.Verbal ?? string.Empty;
-                }
-                catch (Exception typedEx)
-                {
-                    // If typed path fails due to payload mismatch, try extended init
                     try
                     {
-                        var initEx = Steam.SteamInitEx(true);
-                        status = (SteamInitStatus)(int)initEx.Status; // cast to closest enum for logging
-                        verbal = initEx.Verbal ?? string.Empty;
+                        var init = Steam.SteamInit(true);
+                        status = init.Status;
+                        verbal = init.Verbal ?? string.Empty;
                     }
-                    catch (Exception ex2)
+                    catch (Exception typedEx)
                     {
-                        IsSteamInitialized = false;
-                        Adapter = new NullPlatformAdapter();
-                        LastSteamInitStatus = null;
-                        ConsoleSystem.LogWarn($"Steam init failed: {typedEx.Message}; fallback failed: {ex2.Message}", ConsoleChannel.Game);
-                        goto AfterInit;
+                        // If typed path fails due to payload mismatch, try extended init
+                        try
+                        {
+                            var initEx = Steam.SteamInitEx(true);
+                            status = (SteamInitStatus)(int)initEx.Status; // cast to closest enum for logging
+                            verbal = initEx.Verbal ?? string.Empty;
+                        }
+                        catch (Exception ex2)
+                        {
+                            IsSteamInitialized = false;
+                            Adapter = new NullPlatformAdapter();
+                            LastSteamInitStatus = null;
+                            ConsoleSystem.LogWarn($"Steam init failed: {typedEx.Message}; fallback failed: {ex2.Message}", ConsoleChannel.Game);
+                            goto AfterInit;
+                        }
                     }
                 }
 
@@ -280,8 +305,26 @@ public partial class PlatformService : BaseService
                 return;
             }
 
-            // Shutdown any previous session just in case
-            try { Steam.SteamShutdown(); } catch {}
+            // Respect auto-init; if auto, don't manually re-init
+            bool autoInit = false;
+            try
+            {
+                if (ProjectSettings.HasSetting("steam/initialization/initialize_on_startup"))
+                {
+                    var s = ProjectSettings.GetSetting("steam/initialization/initialize_on_startup").ToString();
+                    if (!string.IsNullOrEmpty(s) && bool.TryParse(s.Trim(), out var b))
+                    {
+                        autoInit = b;
+                    }
+                }
+            }
+            catch { }
+
+            // Shutdown any previous session just in case (only if we are doing manual init)
+            if (!autoInit)
+            {
+                try { Steam.SteamShutdown(); } catch {}
+            }
 
             // Attempt a fresh init using the same logic path as _Ready()
             uint appId = 480;
@@ -299,35 +342,45 @@ public partial class PlatformService : BaseService
             }
             catch { }
 
-            try
+            if (!autoInit)
             {
-                var needsRestart = Steam.RestartAppIfNecessary(appId);
-                ConsoleSystem.Log($"[Reconnect] RestartAppIfNecessary({appId}) => {needsRestart}", ConsoleChannel.Game);
-                if (needsRestart && !Engine.IsEditorHint())
+                try
                 {
-                    ConsoleSystem.LogWarn("[Reconnect] Restart requested by Steam; quitting to relaunch under Steam.", ConsoleChannel.Game);
-                    GetTree().Quit();
-                    return;
+                    var needsRestart = Steam.RestartAppIfNecessary(appId);
+                    ConsoleSystem.Log($"[Reconnect] RestartAppIfNecessary({appId}) => {needsRestart}", ConsoleChannel.Game);
+                    if (needsRestart && !Engine.IsEditorHint())
+                    {
+                        ConsoleSystem.LogWarn("[Reconnect] Restart requested by Steam; quitting to relaunch under Steam.", ConsoleChannel.Game);
+                        GetTree().Quit();
+                        return;
+                    }
                 }
-            }
-            catch (Exception restartEx)
-            {
-                ConsoleSystem.LogWarn($"[Reconnect] RestartAppIfNecessary failed: {restartEx.Message}", ConsoleChannel.Game);
+                catch (Exception restartEx)
+                {
+                    ConsoleSystem.LogWarn($"[Reconnect] RestartAppIfNecessary failed: {restartEx.Message}", ConsoleChannel.Game);
+                }
             }
 
             SteamInitStatus status;
             string verbal = string.Empty;
-            try
+            if (!autoInit)
             {
-                var init = Steam.SteamInit(true);
-                status = init.Status;
-                verbal = init.Verbal ?? string.Empty;
+                try
+                {
+                    var init = Steam.SteamInit(true);
+                    status = init.Status;
+                    verbal = init.Verbal ?? string.Empty;
+                }
+                catch (Exception)
+                {
+                    var initEx = Steam.SteamInitEx(true);
+                    status = (SteamInitStatus)(int)initEx.Status;
+                    verbal = initEx.Verbal ?? string.Empty;
+                }
             }
-            catch (Exception)
+            else
             {
-                var initEx = Steam.SteamInitEx(true);
-                status = (SteamInitStatus)(int)initEx.Status;
-                verbal = initEx.Verbal ?? string.Empty;
+                status = SteamInitStatus.SteamworksActive; // rely on auto-init success; runtime checks will confirm
             }
 
             bool loggedOn = false;
