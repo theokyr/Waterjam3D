@@ -1,10 +1,6 @@
 ---
-description: Waterjam3D Development Agent Rules v2 (architecture, workflows, standards)
-globs:
-  - "**/*"
 alwaysApply: true
 ---
-
 ## Waterjam3D Agent Rules v2
 
 Environment

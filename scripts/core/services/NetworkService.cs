@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Godot;
 using Waterjam.Events;
 using Waterjam.Core.Systems.Console;
+using Waterjam.Core.Services.Network;
 
 namespace Waterjam.Core.Services;
 
@@ -18,8 +19,8 @@ public partial class NetworkService : BaseService,
     private NetworkConfig _config;
     private NetworkMode _mode = NetworkMode.None;
 
-    // ENet peer (can be client or server)
-    private ENetMultiplayerPeer _peer;
+    // Pluggable backend adapter
+    private INetworkAdapter _adapter;
 
     // Server state
     private readonly Dictionary<long, ClientState> _connectedClients = new();
@@ -39,7 +40,8 @@ public partial class NetworkService : BaseService,
 
     public bool IsServer => _mode == NetworkMode.Server || _mode == NetworkMode.LocalServer;
     public bool IsClient => _mode == NetworkMode.Client || _mode == NetworkMode.LocalServer;
-    public new bool IsConnected => _peer != null && _peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+    public new bool IsConnected => _adapter != null && _adapter.Peer != null && _adapter.Peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+    public NetworkBackend CurrentBackend => _config.Backend;
     public NetworkMode Mode => _mode;
     public ulong CurrentTick => _currentTick;
 
@@ -47,6 +49,8 @@ public partial class NetworkService : BaseService,
     {
         base._Ready();
         _config = LoadNetworkConfig();
+
+        InitializeAdapter();
 
         // Register console commands
         RegisterConsoleCommands();
@@ -93,17 +97,22 @@ public partial class NetworkService : BaseService,
 
         try
         {
-            _peer = new ENetMultiplayerPeer();
-            var error = _peer.CreateServer(port, _config.MaxPlayers);
+            InitializeAdapter();
 
-            if (error != Error.Ok)
+            if (_adapter == null)
             {
-                ConsoleSystem.LogErr($"[NetworkService] Failed to start server: {error}", ConsoleChannel.Network);
-                _peer = null;
+                ConsoleSystem.LogErr("[NetworkService] No network adapter available", ConsoleChannel.Network);
                 return false;
             }
 
-            GetTree().GetMultiplayer().MultiplayerPeer = _peer;
+            var ok = _adapter.StartServer(port, _config.MaxPlayers);
+            if (!ok)
+            {
+                ConsoleSystem.LogErr("[NetworkService] Failed to start server (adapter)", ConsoleChannel.Network);
+                return false;
+            }
+
+            GetTree().GetMultiplayer().MultiplayerPeer = _adapter.Peer;
             _mode = NetworkMode.Server;
 
             // Connect signals
@@ -118,7 +127,7 @@ public partial class NetworkService : BaseService,
         catch (Exception ex)
         {
             ConsoleSystem.LogErr($"[NetworkService] Failed to start server: {ex.Message}", ConsoleChannel.Network);
-            _peer = null;
+            _adapter?.Disconnect();
             return false;
         }
     }
@@ -228,17 +237,22 @@ public partial class NetworkService : BaseService,
 
         try
         {
-            _peer = new ENetMultiplayerPeer();
-            var error = _peer.CreateClient(address, port);
+            InitializeAdapter();
 
-            if (error != Error.Ok)
+            if (_adapter == null)
             {
-                ConsoleSystem.LogErr($"[NetworkService] Failed to connect to server: {error}", ConsoleChannel.Network);
-                _peer = null;
+                ConsoleSystem.LogErr("[NetworkService] No network adapter available", ConsoleChannel.Network);
                 return false;
             }
 
-            GetTree().GetMultiplayer().MultiplayerPeer = _peer;
+            var ok = _adapter.Connect(address, port);
+            if (!ok)
+            {
+                ConsoleSystem.LogErr("[NetworkService] Failed to connect (adapter)", ConsoleChannel.Network);
+                return false;
+            }
+
+            GetTree().GetMultiplayer().MultiplayerPeer = _adapter.Peer;
             _mode = NetworkMode.Client;
 
             // Connect signals
@@ -253,7 +267,7 @@ public partial class NetworkService : BaseService,
         catch (Exception ex)
         {
             ConsoleSystem.LogErr($"[NetworkService] Failed to connect: {ex.Message}", ConsoleChannel.Network);
-            _peer = null;
+            _adapter?.Disconnect();
             return false;
         }
     }
@@ -319,10 +333,10 @@ public partial class NetworkService : BaseService,
     /// </summary>
     public void Disconnect()
     {
-        if (_peer != null)
+        var multiplayer = GetTree().GetMultiplayer();
+        if (multiplayer != null && multiplayer.MultiplayerPeer != null)
         {
             // Disconnect signals
-            var multiplayer = GetTree().GetMultiplayer();
             if (IsServer)
             {
                 multiplayer.PeerConnected -= OnPeerConnected;
@@ -335,10 +349,10 @@ public partial class NetworkService : BaseService,
                 multiplayer.ServerDisconnected -= OnServerDisconnected;
             }
 
-            _peer.Close();
             multiplayer.MultiplayerPeer = null;
-            _peer = null;
         }
+
+        _adapter?.Disconnect();
 
         _connectedClients.Clear();
         _inputBuffer.Clear();
@@ -360,7 +374,8 @@ public partial class NetworkService : BaseService,
             SnapshotRate = 20,
             AutoStartLocalServer = true,
             EnableCompression = true,
-            InterpolationDelay = 100 // ms
+            InterpolationDelay = 100, // ms
+            Backend = NetworkBackend.ENet
         };
     }
 
@@ -417,6 +432,7 @@ public partial class NetworkService : BaseService,
             {
                 ConsoleSystem.Log($"Network Mode: {_mode}", ConsoleChannel.Network);
                 ConsoleSystem.Log($"Connected: {IsConnected}", ConsoleChannel.Network);
+                ConsoleSystem.Log($"Backend: {_config.Backend}", ConsoleChannel.Network);
                 if (IsServer)
                 {
                     ConsoleSystem.Log($"Tick: {_currentTick}", ConsoleChannel.Network);
@@ -431,9 +447,59 @@ public partial class NetworkService : BaseService,
 
                 return true;
             }));
+
+        consoleSystem.RegisterCommand(new ConsoleCommand(
+            "net_backend",
+            "Get or set networking backend",
+            "net_backend [ENet|Steam|P2P|Null]",
+            async (args) =>
+            {
+                if (args.Length == 0)
+                {
+                    ConsoleSystem.Log($"Backend: {_config.Backend}", ConsoleChannel.Network);
+                    return true;
+                }
+
+                if (!System.Enum.TryParse<NetworkBackend>(args[0], true, out var backend))
+                {
+                    ConsoleSystem.Log("Usage: net_backend [ENet|Steam|P2P|Null]", ConsoleChannel.Network);
+                    return false;
+                }
+
+                if (_mode != NetworkMode.None)
+                {
+                    ConsoleSystem.Log("[NetworkService] Switching backend requires disconnecting...", ConsoleChannel.Network);
+                    Disconnect();
+                }
+
+                _config.Backend = backend;
+                InitializeAdapter();
+                ConsoleSystem.Log($"Backend set to {backend}", ConsoleChannel.Network);
+                return true;
+            }));
     }
 
     #endregion
+
+    private void InitializeAdapter()
+    {
+        switch (_config.Backend)
+        {
+            case NetworkBackend.ENet:
+                _adapter = new ENetNetworkAdapter();
+                break;
+            case NetworkBackend.Steam:
+                _adapter = new SteamNetworkAdapter();
+                break;
+            case NetworkBackend.P2P:
+                _adapter = new P2PNetworkAdapter();
+                break;
+            case NetworkBackend.Null:
+            default:
+                _adapter = new NullNetworkAdapter();
+                break;
+        }
+    }
 }
 
 /// <summary>
@@ -459,6 +525,7 @@ public class NetworkConfig
     public bool AutoStartLocalServer { get; set; } = true;
     public bool EnableCompression { get; set; } = true;
     public int InterpolationDelay { get; set; } = 100; // milliseconds
+    public NetworkBackend Backend { get; set; } = NetworkBackend.ENet;
 }
 
 /// <summary>

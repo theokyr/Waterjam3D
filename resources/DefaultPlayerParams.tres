@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="PlayerParams" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/PlayerParams.cs" id="1_dpp"]
+
+[resource]
+script = ExtResource("1_dpp")
+MoveSpeed = 6.0
+SprintMultiplier = 1.5
+JumpVelocity = 4.5
+Gravity = 9.81
+MouseSensitivity = 0.1
+InvertY = false
+MinPitchDeg = -60.0
+MaxPitchDeg = 80.0
+
+

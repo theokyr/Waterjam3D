@@ -1,3 +1,43 @@
-[gd_scene format=3 uid="uid://g74owxu4shn2"]
+[gd_scene load_steps=6 format=3 uid="uid://g74owxu4shn2"]
+
+[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="1_x2s3y"]
+
+[sub_resource type="BoxMesh" id="ground_mesh"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxShape3D" id="ground_shape"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxMesh" id="ramp_mesh"]
+size = Vector3(6, 0.5, 12)
+
+[sub_resource type="BoxShape3D" id="ramp_shape"]
+size = Vector3(6, 0.5, 12)
 
 [node name="Node3D" type="Node3D"]
+
+[node name="Player" parent="." instance=ExtResource("1_x2s3y")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+
+[node name="Ground" type="StaticBody3D" parent="."]
+
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("ground_mesh")
+
+[node name="GroundCollision" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("ground_shape")
+
+[node name="Ramp" type="StaticBody3D" parent="."]
+transform = Transform3D(0.965926, 0, -0.258819, 0, 1, 0, 0.258819, 0, 0.965926, 6, 0.25, -3)
+
+[node name="RampMesh" type="MeshInstance3D" parent="Ramp"]
+mesh = SubResource("ramp_mesh")
+
+[node name="RampCollision" type="CollisionShape3D" parent="Ramp"]
+shape = SubResource("ramp_shape")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -0.7265267, 0.68713826, 0, -0.68713826, -0.7265267, 0, 4.370678, 0)
+
+[node name="FillLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 3, 4)

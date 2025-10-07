@@ -163,21 +163,21 @@ public partial class ConsoleSystem : Node,
 
         // Quick-load dev citygen map
         RegisterCommand(new ConsoleCommand(
-            "load_dev_citygen",
+            "load_dev",
             "Loads the dev city generation sandbox scene",
-            "load_dev_citygen",
+            "load_dev",
             async _ =>
             {
-                GameEvent.DispatchGlobal(new SceneLoadRequestedEvent("res://scenes/dev/dev_citygen.tscn"));
+                GameEvent.DispatchGlobal(new SceneLoadRequestedEvent("res://scenes/dev/dev.tscn"));
                 return true;
             }
         ));
 
-        // Map loading command: `map <scene_path>` e.g., map res://scenes/dev/dev_citygen.tscn
+        // Map loading command: `map <scene_path>` e.g., map res://scenes/dev/dev.tscn
         RegisterCommand(new ConsoleCommand(
             "map",
             "Loads a scene by path. Usage: map <res://path/to/scene.tscn> (accepts /dev/*.tscn)",
-            "map res://scenes/dev/dev_citygen.tscn",
+            "map res://scenes/dev/dev.tscn",
             async args =>
             {
                 if (args.Length < 1)
@@ -663,14 +663,15 @@ public partial class ConsoleSystem : Node,
             }
 
             // Try to write to Godot output if available (but don't fail if it's not)
+            // Only push to Godot's error/warning system for explicit Godot channels
             try
             {
                 switch (channel)
                 {
-                    case ConsoleChannel.Error:
+                    case ConsoleChannel.GodotError:
                         if (!string.IsNullOrEmpty(formatted)) GD.PushError(formatted);
                         break;
-                    case ConsoleChannel.Warning:
+                    case ConsoleChannel.GodotWarning:
                         if (!string.IsNullOrEmpty(formatted)) GD.PushWarning(formatted);
                         break;
                     default:
@@ -768,12 +769,28 @@ public partial class ConsoleSystem : Node,
 
     public static void LogErr(string message, ConsoleChannel channel = ConsoleChannel.Error)
     {
-        Log(message, ConsoleChannel.Error);
+        Log(message, channel);
     }
 
     public static void LogWarn(string message, ConsoleChannel channel = ConsoleChannel.Warning)
     {
-        Log(message, ConsoleChannel.Warning);
+        Log(message, channel);
+    }
+
+    /// <summary>
+    /// Log an error message and push it to Godot's error system
+    /// </summary>
+    public static void LogGodotError(string message)
+    {
+        Log(message, ConsoleChannel.GodotError);
+    }
+
+    /// <summary>
+    /// Log a warning message and push it to Godot's warning system
+    /// </summary>
+    public static void LogGodotWarning(string message)
+    {
+        Log(message, ConsoleChannel.GodotWarning);
     }
 
     public IEnumerable<ConsoleMessage> GetHistory()
