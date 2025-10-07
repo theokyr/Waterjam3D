@@ -28,7 +28,7 @@ mesh = SubResource("ground_mesh")
 shape = SubResource("ground_shape")
 
 [node name="Ramp" type="StaticBody3D" parent="."]
-transform = Transform3D(0.965926, 0, -0.258819, 0, 1, 0, 0.258819, 0, 0.965926, 6, 0.25, -3)
+transform = Transform3D(0.96592593, 0, -0.25881898, 0.029976761, 0.99327004, 0.111874826, 0.25707716, -0.11582132, 0.9594253, 6, 0.44700646, -3)
 
 [node name="RampMesh" type="MeshInstance3D" parent="Ramp"]
 mesh = SubResource("ramp_mesh")
@@ -38,6 +38,7 @@ shape = SubResource("ramp_shape")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, -0.7265267, 0.68713826, 0, -0.68713826, -0.7265267, 0, 4.370678, 0)
+shadow_enabled = true
 
 [node name="FillLight" type="OmniLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 3, 4)

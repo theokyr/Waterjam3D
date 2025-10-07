@@ -11,6 +11,7 @@ public partial class Settings : PanelContainer, IGameEventHandler<SettingsLoaded
     private const string SETTINGS_GROUP_CONTROLS = "controls";
     private const string SETTINGS_GROUP_GAME = "game";
     private const string SETTINGS_GROUP_UI = "ui";
+    private const string SETTINGS_GROUP_VOICE = "voice";
 
     // UI Elements
     private OptionButton resolutionOption;
@@ -31,6 +32,13 @@ public partial class Settings : PanelContainer, IGameEventHandler<SettingsLoaded
     private CheckBox highContrastCheckBox;
     private OptionButton hudVariantOption;
     private HSlider scanlinesIntensitySlider;
+
+    // Voice UI Elements
+    private OptionButton voiceModeOption;
+    private Button pushToTalkKeyButton;
+    private HSlider voiceMasterVolumeSlider;
+    private HSlider voiceActivationThresholdSlider;
+    private HSlider proximityRangeSlider;
 
     [Signal]
     public delegate void BackButtonPressedEventHandler();
@@ -63,6 +71,13 @@ public partial class Settings : PanelContainer, IGameEventHandler<SettingsLoaded
         highContrastCheckBox = GetNode<CheckBox>("%HighContrastCheckBox");
         hudVariantOption = GetNodeOrNull<OptionButton>("%HudVariantOption");
         scanlinesIntensitySlider = GetNodeOrNull<HSlider>("%ScanlinesIntensitySlider");
+
+        // Voice UI Elements
+        voiceModeOption = GetNode<OptionButton>("%VoiceModeOption");
+        pushToTalkKeyButton = GetNode<Button>("%PushToTalkKeyButton");
+        voiceMasterVolumeSlider = GetNode<HSlider>("%MasterVolumeSlider");
+        voiceActivationThresholdSlider = GetNode<HSlider>("%VoiceActivationThresholdSlider");
+        proximityRangeSlider = GetNode<HSlider>("%ProximityRangeSlider");
     }
 
     private void InitializeOptions()
@@ -134,11 +149,55 @@ public partial class Settings : PanelContainer, IGameEventHandler<SettingsLoaded
         // Back button
         var backButton = GetNode<Button>("MarginContainer/Content/BackButton");
         backButton.Pressed += OnBackButtonPressed;
+
         // UI settings
         if (hudVariantOption != null)
             hudVariantOption.ItemSelected += index => ApplyUiSetting("hud_variant", ((int)index) == 1 ? "v2" : "classic");
         if (scanlinesIntensitySlider != null)
             scanlinesIntensitySlider.ValueChanged += value => ApplyUiSetting("scanlines_intensity", (float)value);
+
+        // Voice settings
+        voiceModeOption.ItemSelected += index => ApplyVoiceSetting("voice_mode", index);
+        pushToTalkKeyButton.Pressed += OnPushToTalkKeyButtonPressed;
+        voiceMasterVolumeSlider.ValueChanged += value => ApplyVoiceSetting("master_volume", value);
+        voiceActivationThresholdSlider.ValueChanged += value => ApplyVoiceSetting("voice_activation_threshold", value);
+        proximityRangeSlider.ValueChanged += value => ApplyVoiceSetting("proximity_range", value);
+
+        // Apply methods
+        void ApplyVoiceSetting(string key, Variant value)
+        {
+            var settingsService = GetNode<Waterjam.Core.Services.SettingsService>("/root/SettingsService");
+            if (settingsService != null)
+            {
+                settingsService.SetVoiceSetting(key, value);
+
+                // Notify voice service about settings change
+                var voiceService = GetNodeOrNull<Waterjam.Game.Services.Voice.VoiceChatService>("/root/VoiceChatService");
+                if (voiceService != null)
+                {
+                    var currentSettings = voiceService.GetVoiceSettings();
+                    switch (key)
+                    {
+                        case "voice_mode":
+                            currentSettings.VoiceMode = (Waterjam.Game.Services.Voice.VoiceMode)(int)value;
+                            break;
+                        case "push_to_talk_key":
+                            currentSettings.PushToTalkKey = (Key)(int)value;
+                            break;
+                        case "master_volume":
+                            currentSettings.MasterVolume = (float)value;
+                            break;
+                        case "voice_activation_threshold":
+                            currentSettings.VoiceActivationThreshold = (float)value;
+                            break;
+                        case "proximity_range":
+                            currentSettings.ProximityRange = (float)value;
+                            break;
+                    }
+                    voiceService.UpdateVoiceSettings(currentSettings);
+                }
+            }
+        }
     }
 
     private string GetResolutionFromIndex(int index)
@@ -269,11 +328,61 @@ public partial class Settings : PanelContainer, IGameEventHandler<SettingsLoaded
                 scanlinesIntensitySlider.Value = (float)scanlinesIntensity;
             }
         }
+
+        // Load Voice Settings using SettingsService directly
+        var settingsService = GetNode<Waterjam.Core.Services.SettingsService>("/root/SettingsService");
+        if (settingsService != null)
+        {
+            voiceModeOption.Selected = (int)settingsService.GetVoiceSetting("voice_mode", 1); // Default to PushToTalk
+            UpdatePushToTalkKeyDisplay((Key)(int)settingsService.GetVoiceSetting("push_to_talk_key", (int)Key.T));
+            voiceMasterVolumeSlider.Value = (float)settingsService.GetVoiceSetting("master_volume", 0.8f);
+            voiceActivationThresholdSlider.Value = (float)settingsService.GetVoiceSetting("voice_activation_threshold", -40.0f);
+            proximityRangeSlider.Value = (float)settingsService.GetVoiceSetting("proximity_range", 50.0f);
+        }
     }
 
     private void OnBackButtonPressed()
     {
         EmitSignal(SignalName.BackButtonPressed);
+    }
+
+    private void OnPushToTalkKeyButtonPressed()
+    {
+        // Start key capture mode for PTT key binding
+        pushToTalkKeyButton.Text = "Press any key...";
+        pushToTalkKeyButton.FocusMode = FocusModeEnum.Click;
+
+        // Set up input capture using Input singleton
+        SetProcessInput(true);
+    }
+
+    public override void _Input(InputEvent @event)
+    {
+        if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo)
+        {
+            var key = keyEvent.Keycode;
+
+            // Don't allow certain keys that would conflict with the UI
+            if (key == Key.Escape || key == Key.Enter || key == Key.Tab)
+            {
+                UpdatePushToTalkKeyDisplay(Key.T); // Reset to default
+                SetProcessInput(false);
+                return;
+            }
+
+            UpdatePushToTalkKeyDisplay(key);
+            var settingsService = GetNode<Waterjam.Core.Services.SettingsService>("/root/SettingsService");
+            if (settingsService != null)
+            {
+                settingsService.SetVoiceSetting("push_to_talk_key", (int)key);
+            }
+            SetProcessInput(false);
+        }
+    }
+
+    private void UpdatePushToTalkKeyDisplay(Key key)
+    {
+        pushToTalkKeyButton.Text = key.ToString();
     }
 
     // Quality Preset Handlers

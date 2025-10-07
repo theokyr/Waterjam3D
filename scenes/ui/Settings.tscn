@@ -522,6 +522,126 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 4
 
+[node name="Voice" type="ScrollContainer" parent="MarginContainer/Content/TabContainer"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+metadata/_tab_index = 5
+
+[node name="VoiceSettings" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Voice"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="VoiceModeSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VoiceModeSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Voice Chat Mode"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VoiceModeSection"]
+layout_mode = 2
+columns = 2
+
+[node name="VoiceModeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VoiceModeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Voice Mode:"
+
+[node name="VoiceModeOption" type="OptionButton" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VoiceModeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 3
+popup/item_0/text = "Always On"
+popup/item_0/id = 0
+popup/item_1/text = "Push to Talk"
+popup/item_1/id = 1
+popup/item_2/text = "Voice Activation"
+popup/item_2/id = 2
+
+[node name="PushToTalkKeyLabel" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VoiceModeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Push to Talk Key:"
+
+[node name="PushToTalkKeyButton" type="Button" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VoiceModeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "T"
+
+[node name="VolumeSection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VolumeSection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Voice Settings"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VolumeSection"]
+layout_mode = 2
+columns = 2
+
+[node name="MasterVolumeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VolumeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Master Volume:"
+
+[node name="MasterVolumeSlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VolumeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+value = 0.8
+
+[node name="VoiceActivationThresholdLabel" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VolumeSection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Voice Activation Threshold (dB):"
+
+[node name="VoiceActivationThresholdSlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/VolumeSection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -60.0
+max_value = 0.0
+step = 1.0
+value = -40.0
+
+[node name="ProximitySection" type="VBoxContainer" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings"]
+layout_mode = 2
+
+[node name="SectionTitle" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/ProximitySection"]
+layout_mode = 2
+theme_type_variation = &"SubtitleLabel"
+text = "Proximity Chat"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/ProximitySection"]
+layout_mode = 2
+columns = 2
+
+[node name="ProximityRangeLabel" type="Label" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/ProximitySection/GridContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Proximity Range:"
+
+[node name="ProximityRangeSlider" type="HSlider" parent="MarginContainer/Content/TabContainer/Voice/VoiceSettings/ProximitySection/GridContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 10.0
+max_value = 100.0
+step = 1.0
+value = 50.0
+
 [node name="HSeparator2" type="HSeparator" parent="MarginContainer/Content"]
 layout_mode = 2
 

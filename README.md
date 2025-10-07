@@ -1,6 +1,6 @@
-## Waterjam 3D
+## Waterjam3D
 
-Waterjam 3D is a Godot 4.5 (Mono/C#) project. It boots into a lightweight root scene and overlays a UI shell (UiRoot) that provides the Main Menu, Loading Screen, Pause Menu, and an in-game Developer Console.
+Waterjam3D is a Godot 4.5 (Mono/C#) project. It boots into a lightweight root scene and overlays a UI shell (UiRoot) that provides the Main Menu, Loading Screen, Pause Menu, and an in-game Developer Console.
 
 ### Features
 - Main Menu overlayed on the root scene (loads additively)
@@ -54,7 +54,7 @@ godot4-mono.exe --path . -fs -w 1920 -h 1080 +map res://scenes/dev/dev.tscn
 The console monitors an MCP inbox for command files and writes results to an outbox.
 
 Locations (Windows):
-- User data: `%APPDATA%/Godot/app_userdata/Waterjam 3D/`
+- User data: `%APPDATA%/Godot/app_userdata/Waterjam3D/`
 - Inbox: `.../mcp/inbox/`
 - Outbox: `.../mcp/outbox/`
 

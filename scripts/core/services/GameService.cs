@@ -20,9 +20,6 @@ public partial class GameService : BaseService,
 
     private void InitializeGame()
     {
-        // Ensure ScriptEngine exists very early for consumers in _Ready()
-        EnsureScriptEngineBootstrap();
-
         ConsoleSystem.Log("Let there be light!", ConsoleChannel.Game);
         GameEvent.DispatchGlobal(new GameInitializedEvent(true));
 
@@ -31,50 +28,6 @@ public partial class GameService : BaseService,
         {
             ConsoleSystem.Log("Current scene is not root. Starting new game immediately.", ConsoleChannel.Game);
             StartNewGame();
-        }
-    }
-
-    private void EnsureScriptEngineBootstrap()
-    {
-        try
-        {
-            var tree = Engine.GetMainLoop() as SceneTree;
-            var root = tree?.Root;
-            if (root == null) return;
-
-            var systems = root.GetNodeOrNull<Node>("GameSystems");
-            if (systems == null)
-            {
-                // Try to instantiate compatibility prefab; else create an empty container
-                PackedScene prefab = null;
-                try
-                {
-                    if (FileAccess.FileExists("res://scenes/prefabs/GameSystems.tscn"))
-                        prefab = GD.Load<PackedScene>("res://scenes/prefabs/GameSystems.tscn");
-                }
-                catch
-                {
-                    // ignore
-                }
-
-                if (prefab != null)
-                {
-                    var inst = prefab.Instantiate<Node>();
-                    if (inst.Name != "GameSystems") inst.Name = "GameSystems";
-                    // Defer to avoid 'parent busy' errors during early boot
-                    root.CallDeferred(Node.MethodName.AddChild, inst);
-                    systems = inst;
-                }
-                else
-                {
-                    systems = new Node { Name = "GameSystems" };
-                    root.CallDeferred(Node.MethodName.AddChild, systems);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            ConsoleSystem.LogErr($"[GameService] Failed to bootstrap ScriptEngine: {ex.Message}");
         }
     }
 

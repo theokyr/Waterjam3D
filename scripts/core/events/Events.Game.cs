@@ -17,3 +17,10 @@ public record ConsoleCommandUnregisteredEvent(ConsoleCommand Command) : IGameEve
 public record ConsoleMessageLoggedEvent(ConsoleMessage Message) : IGameEvent;
 
 public record ConsoleHistoryClearedEvent() : IGameEvent;
+
+// Network Player Events
+public record NetworkPlayerSpawnedEvent(long PeerId, Vector3 Position, string PlayerName) : IGameEvent;
+
+public record NetworkPlayerRemovedEvent(long PeerId) : IGameEvent;
+
+public record NetworkPlayerMovedEvent(long PeerId, Vector3 Position, Vector3 Velocity) : IGameEvent;

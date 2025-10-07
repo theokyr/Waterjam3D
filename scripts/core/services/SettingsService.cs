@@ -71,6 +71,13 @@ public partial class SettingsService : BaseService,
         EnsureDefaultValue("display", "ssao", 0);
         EnsureDefaultValue("controls", "mouse_sensitivity", 1.0f);
         EnsureDefaultValue("controls", "invert_y", false);
+
+        // Voice chat defaults
+        EnsureDefaultValue("voice", "push_to_talk_key", (int)Key.T);
+        EnsureDefaultValue("voice", "voice_mode", (int)0); // 0=AlwaysOn, 1=PushToTalk, 2=VoiceActivation
+        EnsureDefaultValue("voice", "master_volume", 0.8f);
+        EnsureDefaultValue("voice", "voice_activation_threshold", -40.0f);
+        EnsureDefaultValue("voice", "proximity_range", 50.0f);
         EnsureDefaultValue("accessibility", "reduce_flashing", false);
         EnsureDefaultValue("accessibility", "reduce_motion", false);
         EnsureDefaultValue("accessibility", "high_contrast", false);
@@ -99,6 +106,13 @@ public partial class SettingsService : BaseService,
         // Control defaults
         _config.SetValue("controls", "mouse_sensitivity", 1.0f);
         _config.SetValue("controls", "invert_y", false);
+
+        // Voice chat defaults
+        _config.SetValue("voice", "push_to_talk_key", (int)Key.T);
+        _config.SetValue("voice", "voice_mode", (int)0); // 0=AlwaysOn, 1=PushToTalk, 2=VoiceActivation
+        _config.SetValue("voice", "master_volume", 0.8f);
+        _config.SetValue("voice", "voice_activation_threshold", -40.0f);
+        _config.SetValue("voice", "proximity_range", 50.0f);
 
         // Accessibility defaults
         _config.SetValue("accessibility", "reduce_flashing", false);
@@ -452,5 +466,26 @@ public partial class SettingsService : BaseService,
     public bool IsTestRunnerUIVisible()
     {
         return (bool)_config.GetValue("ui", "test_runner_ui_visible", false);
+    }
+
+    /// <summary>
+    /// Gets a voice setting value.
+    /// </summary>
+    public Variant GetVoiceSetting(string key, Variant defaultValue = default)
+    {
+        return _config.GetValue("voice", key, defaultValue);
+    }
+
+    /// <summary>
+    /// Sets a voice setting value.
+    /// </summary>
+    public void SetVoiceSetting(string key, Variant value)
+    {
+        _config.SetValue("voice", key, value);
+        var err = _config.Save(SettingsFilePath);
+        if (err != Error.Ok)
+        {
+            ConsoleSystem.LogErr($"Failed to save voice setting: {err}", ConsoleChannel.System);
+        }
     }
 }
