@@ -18,5 +18,7 @@ public enum ConsoleChannel
     Player,
     World,
     Entity,
-    Network
+    Network,
+    GodotError,
+    GodotWarning
 }
