@@ -1,6 +1,8 @@
 using System.Linq;
 using Godot;
 using Waterjam.Events;
+using GodotSteam;
+using Waterjam.Core.Services;
 
 namespace Waterjam.UI.Components;
 
@@ -20,6 +22,7 @@ public partial class PartyBar : Control,
 	{
 		// Layout: [avatars ...] [+]
 		Name = "PartyBar";
+		ZIndex = 100;
 		AnchorRight = 1.0f;
 		AnchorTop = 0f;
 		AnchorBottom = 0f;
@@ -27,6 +30,7 @@ public partial class PartyBar : Control,
 		OffsetTop = 8f;
 		OffsetBottom = 56f;
 		GrowHorizontal = GrowDirection.Both;
+		MouseFilter = MouseFilterEnum.Stop;
 
 		var root = new HBoxContainer();
 		root.Name = "Root";
@@ -53,33 +57,11 @@ public partial class PartyBar : Control,
 		Refresh();
 	}
 
-	private void OnInvitePressed()
-	{
-		var dialog = new AcceptDialog();
-		dialog.Title = "Invite Player";
-		dialog.DialogText = "Enter player ID to invite:";
-		dialog.AddCancelButton("Cancel");
-
-		var lineEdit = new LineEdit();
-		lineEdit.PlaceholderText = "player123";
-		dialog.AddChild(lineEdit);
-
-		var messageEdit = new TextEdit();
-		messageEdit.Size = new Vector2(300, 80);
-		messageEdit.PlaceholderText = "Optional message...";
-		dialog.AddChild(messageEdit);
-
-		dialog.Confirmed += () =>
-		{
-			var playerId = lineEdit.Text?.Trim();
-			if (string.IsNullOrWhiteSpace(playerId)) return;
-			var message = messageEdit.Text;
-			GameEvent.DispatchGlobal(new InviteToPartyRequestEvent(playerId, message));
-		};
-
-		AddChild(dialog);
-		dialog.PopupCentered();
-	}
+    private void OnInvitePressed()
+    {
+        // Navigate to Party screen where full invite UI is available
+        GameEvent.DispatchGlobal(new UiShowPartyScreenEvent());
+    }
 
 	private void Refresh()
 	{
@@ -96,11 +78,12 @@ public partial class PartyBar : Control,
         var party = partyService.GetCurrentPlayerParty();
         var localId = partyService.GetLocalPlayerId();
 
-		// Always show current player first (even if not in a formal party yet)
+        // Always show current player first (even if not in a formal party yet)
         if (!string.IsNullOrEmpty(localId))
-		{
-			_avatarRow.AddChild(CreateAvatar(localId, isLeader: party?.LeaderPlayerId == localId, display: "You"));
-		}
+        {
+            var displaySelf = GetLocalDisplayName();
+            _avatarRow.AddChild(CreateAvatar(localId, isLeader: party?.LeaderPlayerId == localId, display: displaySelf));
+        }
 
         if (party != null)
 		{
@@ -140,13 +123,13 @@ public partial class PartyBar : Control,
     private Control BuildAvatarImage(string playerId)
     {
         // If Steam is initialized, try to fetch Steam avatar; otherwise show fallback rect
-        if (Waterjam.Core.Services.PlatformService.IsSteamInitialized)
+        if (PlatformService.IsSteamInitialized)
         {
             try
             {
                 // Try to get a small avatar synchronously (Steam returns an index). If 0 or failure, fallback.
-                var steamId = ulong.TryParse(playerId, out var id) ? id : GodotSteam.Steam.GetSteamID();
-                var avatarIndex = GodotSteam.Steam.GetSmallFriendAvatar(steamId);
+                var steamId = ulong.TryParse(playerId, out var id) ? id : Steam.GetSteamID();
+                var avatarIndex = Steam.GetSmallFriendAvatar(steamId);
 
                 var texRect = new TextureRect();
                 texRect.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
@@ -154,20 +137,35 @@ public partial class PartyBar : Control,
                 texRect.CustomMinimumSize = new Vector2(36, 36);
 
                 // Listen for async image load; request player avatar to trigger signal
-                GodotSteam.Steam.AvatarImageLoaded += (avatarId, index, w, h) =>
+                // One-shot handlers to avoid accumulation
+                Steam.AvatarImageLoadedEventHandler onImageLoaded = null;
+                onImageLoaded = (avatarId, index, w, h) =>
                 {
-                    if (index != (uint)avatarIndex) return;
-                    // Avatar image is provided via GetImageRGBA; bindings expose utils for reading it through utils methods.
-                    var img = GodotSteam.Steam.GetImageRGBA((int)index);
+                    if (avatarId != steamId) return;
+                    var img = Steam.GetImageRGBA((int)index);
                     if (img != null && img.Success && img.Buffer != null)
                     {
                         var image = Image.CreateFromData((int)w, (int)h, false, Image.Format.Rgba8, img.Buffer);
                         var tex = ImageTexture.CreateFromImage(image);
                         texRect.Texture = tex;
+                        try { Steam.AvatarImageLoaded -= onImageLoaded; } catch { }
                     }
                 };
+                Steam.AvatarImageLoaded += onImageLoaded;
 
-                GodotSteam.Steam.GetPlayerAvatar(GodotSteam.AvatarSize.Small, steamId);
+                Steam.AvatarLoadedEventHandler onAvatarLoaded = null;
+                onAvatarLoaded = (avatarId, width, data) =>
+                {
+                    if (avatarId != steamId || data == null || data.Length == 0) return;
+                    var image = Image.CreateFromData(width, width, false, Image.Format.Rgba8, data);
+                    var tex = ImageTexture.CreateFromImage(image);
+                    texRect.Texture = tex;
+                    try { Steam.AvatarLoaded -= onAvatarLoaded; } catch { }
+                };
+                Steam.AvatarLoaded += onAvatarLoaded;
+
+                // Trigger load
+                Steam.GetPlayerAvatar(AvatarSize.Small, steamId);
 
                 return texRect;
             }
@@ -183,8 +181,22 @@ public partial class PartyBar : Control,
         return rect;
     }
 
-	public void OnGameEvent(PartyCreatedEvent e) => CallDeferred(nameof(Refresh));
-	public void OnGameEvent(PartyJoinedEvent e) => CallDeferred(nameof(Refresh));
+    private string GetLocalDisplayName()
+    {
+        if (PlatformService.IsSteamInitialized)
+        {
+            try
+            {
+                var name = Steam.GetPersonaName();
+                if (!string.IsNullOrWhiteSpace(name)) return name;
+            }
+            catch { }
+        }
+        return "You";
+    }
+
+    public void OnGameEvent(PartyCreatedEvent e) { CallDeferred(nameof(Refresh)); Waterjam.Events.GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent()); }
+    public void OnGameEvent(PartyJoinedEvent e) { CallDeferred(nameof(Refresh)); Waterjam.Events.GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent()); }
 	public void OnGameEvent(PartyLeftEvent e) => CallDeferred(nameof(Refresh));
 	public void OnGameEvent(PartyMemberJoinedEvent e) => CallDeferred(nameof(Refresh));
 	public void OnGameEvent(PartyMemberLeftEvent e) => CallDeferred(nameof(Refresh));

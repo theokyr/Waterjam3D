@@ -22,3 +22,7 @@ visible = false
 layout_mode = 1
 
 [node name="DeveloperConsoleLayer" parent="." instance=ExtResource("7_console_layer")]
+
+[node name="MainMenuPlaceholder" type="Control" parent="."]
+visible = false
+layout_mode = 1

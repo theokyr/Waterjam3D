@@ -38,6 +38,25 @@ public partial class PartyService : BaseService,
         if (PlatformService.IsSteamInitialized)
         {
             SetupSteamCallbacks();
+            // Initialize local player ID from Steam for frictionless UI/avatar flows
+            try
+            {
+                var sid = Steam.GetSteamID();
+                if (sid != 0)
+                {
+                    _localPlayerId = sid.ToString();
+                    ConsoleSystem.Log($"[PartyService] Local player set from Steam: {_localPlayerId}", ConsoleChannel.Game);
+                }
+            }
+            catch (Exception ex)
+            {
+                ConsoleSystem.LogWarn($"[PartyService] Failed to read SteamID: {ex.Message}", ConsoleChannel.Game);
+            }
+        }
+        else if (string.IsNullOrEmpty(_localPlayerId))
+        {
+            // Fallback local ID for non-Steam environments
+            _localPlayerId = "local";
         }
 
         // Register console commands for debugging
@@ -397,8 +416,38 @@ public partial class PartyService : BaseService,
             var party = GetPlayerParty(_localPlayerId);
             if (party == null)
             {
-                ConsoleSystem.LogErr("Cannot send invite: not in a party", ConsoleChannel.Game);
-                return;
+                // Frictionless flow: auto-create a party if not already in one
+                var partyId = GeneratePartyId();
+                var partyCode = GeneratePartyCode();
+                var displayName = "My Party";
+                try
+                {
+                    if (PlatformService.IsSteamInitialized)
+                    {
+                        var name = Steam.GetPersonaName();
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            displayName = $"{name}'s Party";
+                        }
+                    }
+                }
+                catch { }
+
+                party = new Waterjam.Domain.Party.Party(partyId, partyCode, _localPlayerId, displayName);
+                _parties[partyId] = party;
+                _playerPartyMap[_localPlayerId] = partyId;
+
+                var chatChannel = new ChatChannel(partyId, $"Party: {displayName}", ChatChannelType.Party);
+                _partyChatChannels[partyId] = chatChannel;
+
+                ConsoleSystem.Log($"[PartyService] Auto-created party '{displayName}' to send invite.", ConsoleChannel.Game);
+
+                if (PlatformService.IsSteamInitialized)
+                {
+                    CreateSteamLobby(party, maxMembers: 8);
+                }
+
+                GameEvent.DispatchGlobal(new PartyCreatedEvent(partyId, partyCode, _localPlayerId, displayName));
             }
 
             if (party.LeaderPlayerId != _localPlayerId)

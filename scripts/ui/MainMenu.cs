@@ -86,7 +86,7 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
     private void OnMultiplayerButtonPressed()
     {
         OnButtonPressed();
-        ShowMultiplayerUI();
+        ShowLobbyUI();
     }
 
     private void OnOptionsButtonPressed()

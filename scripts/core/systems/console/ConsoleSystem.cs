@@ -133,6 +133,24 @@ public partial class ConsoleSystem : Node,
         ));
 
         RegisterCommand(new ConsoleCommand(
+            "quit",
+            "Quits the game",
+            "quit",
+            async (_) =>
+            {
+                GameEvent.DispatchGlobal(new QuitRequestedEvent());
+                return true;
+            }
+        ));
+
+        RegisterCommand(new ConsoleCommand(
+            "exit",
+            "Alias for quit",
+            "exit",
+            async (args) => await ExecuteCommand("quit")
+        ));
+
+        RegisterCommand(new ConsoleCommand(
             "hud_variant",
             "Switch HUD variant at runtime (classic|v2)",
             "hud_variant <classic|v2>",

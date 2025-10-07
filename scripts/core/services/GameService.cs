@@ -8,7 +8,8 @@ using Waterjam.Core.Systems.Console;
 namespace Waterjam.Game.Services;
 
 public partial class GameService : BaseService,
-    IGameEventHandler<NewGameStartedEvent>
+    IGameEventHandler<NewGameStartedEvent>,
+    IGameEventHandler<QuitRequestedEvent>
 {
     public const string RootScene = "res://scenes/root.tscn";
 
@@ -55,6 +56,11 @@ public partial class GameService : BaseService,
     {
         ConsoleSystem.Log("Quitting game!", ConsoleChannel.Game);
         GetTree().Quit();
+    }
+
+    public void OnGameEvent(QuitRequestedEvent eventArgs)
+    {
+        QuitGame();
     }
 
     public void OnGameEvent(NewGameStartedEvent eventArgs)

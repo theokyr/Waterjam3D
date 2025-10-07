@@ -8,6 +8,8 @@ public record GameInitializedEvent(bool Success) : IGameEvent;
 
 public record NewGameStartedEvent(string LevelScenePath = "res://scenes/dev/dev.tscn") : IGameEvent;
 
+public record QuitRequestedEvent() : IGameEvent;
+
 public record CharacterDamagedEvent(Entity Attacker = null, Entity Victim = null, float Damage = 0.0f) : IGameEvent;
 
 public record ConsoleCommandRegisteredEvent(ConsoleCommand Command) : IGameEvent;
