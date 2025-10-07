@@ -101,7 +101,7 @@ public partial class PlatformService : BaseService
                 }
 
                 LastSteamInitStatus = status;
-				// Treat initialization as successful only if Steamworks is active AND user is logged on with a valid SteamID
+				// Consider Steam ready primarily by runtime checks; some bindings return 0 for success in SteamInitEx
 				bool loggedOn = false;
 				ulong steamId = 0;
 				try
@@ -114,19 +114,17 @@ public partial class PlatformService : BaseService
 					ConsoleSystem.LogWarn($"Steam post-init checks failed: {checkEx.Message}", ConsoleChannel.Game);
 				}
 
-                if (status == SteamInitStatus.SteamworksActive && loggedOn && steamId != 0)
+                if (loggedOn && steamId != 0)
                 {
                     IsSteamInitialized = true;
                     Adapter = new SteamPlatformAdapter();
-                    // Avoid calling GetAppID immediately; Steam Utils may not be ready yet.
-                    ConsoleSystem.Log($"Steam initialized. App ID: {appId}; LoggedOn={loggedOn}; SteamID={steamId}; {verbal}", ConsoleChannel.Game);
+                    ConsoleSystem.Log($"Steam initialized. Status={status}; App ID: {appId}; LoggedOn={loggedOn}; SteamID={steamId}; {verbal}", ConsoleChannel.Game);
                 }
                 else
                 {
                     IsSteamInitialized = false;
                     Adapter = new NullPlatformAdapter();
-                    var reason = status != SteamInitStatus.SteamworksActive ? status.ToString() : (loggedOn ? "InvalidSteamID" : "NotLoggedOn");
-                    ConsoleSystem.LogWarn($"Steam init incomplete: {reason}. LoggedOn={loggedOn}; SteamID={steamId}; Details: {verbal}", ConsoleChannel.Game);
+                    ConsoleSystem.LogWarn($"Steam init incomplete: {status}. LoggedOn={loggedOn}; SteamID={steamId}; Details: {verbal}", ConsoleChannel.Game);
                 }
             }
         }
@@ -342,7 +340,8 @@ public partial class PlatformService : BaseService
             catch { }
 
             LastSteamInitStatus = status;
-            if (status == SteamInitStatus.SteamworksActive && loggedOn && steamId != 0)
+            // Favor runtime checks (loggedOn + steamId) over status code interpretation
+            if (loggedOn && steamId != 0)
             {
                 IsSteamInitialized = true;
                 Adapter = new SteamPlatformAdapter();
@@ -352,8 +351,7 @@ public partial class PlatformService : BaseService
             {
                 IsSteamInitialized = false;
                 Adapter = new NullPlatformAdapter();
-                var reason = status != SteamInitStatus.SteamworksActive ? status.ToString() : (loggedOn ? "InvalidSteamID" : "NotLoggedOn");
-                ConsoleSystem.LogWarn($"[Reconnect] Steam still not ready: {reason}. LoggedOn={loggedOn}; SteamID={steamId}; Details: {verbal}", ConsoleChannel.Game);
+                ConsoleSystem.LogWarn($"[Reconnect] Steam still not ready: {status}. LoggedOn={loggedOn}; SteamID={steamId}; Details: {verbal}", ConsoleChannel.Game);
             }
         }
         catch (Exception ex)
