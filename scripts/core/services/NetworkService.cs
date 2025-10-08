@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
+using GodotSteam;
 using Waterjam.Events;
 using Waterjam.Core.Systems.Console;
 using Waterjam.Core.Services.Network;
+using Waterjam.Game;
+using Waterjam.Game.Services.Voice;
 
 namespace Waterjam.Core.Services;
 
@@ -13,7 +17,9 @@ namespace Waterjam.Core.Services;
 /// Handles connections, message routing, and network state management.
 /// </summary>
 public partial class NetworkService : BaseService,
-    IGameEventHandler<GameInitializedEvent>
+    IGameEventHandler<GameInitializedEvent>,
+    IGameEventHandler<SceneLoadEvent>,
+    IGameEventHandler<LobbyStartedEvent>
 {
     // Configuration
     private NetworkConfig _config;
@@ -38,12 +44,16 @@ public partial class NetworkService : BaseService,
     public const string PROTOCOL_VERSION = "0.1.0";
     public static readonly string[] SUPPORTED_PROTOCOLS = { "0.1.0" };
 
+    // Player management
+    private readonly Dictionary<long, PlayerEntity> _networkedPlayers = new();
+
     public bool IsServer => _mode == NetworkMode.Server || _mode == NetworkMode.LocalServer;
     public bool IsClient => _mode == NetworkMode.Client || _mode == NetworkMode.LocalServer;
     public new bool IsConnected => _adapter != null && _adapter.Peer != null && _adapter.Peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
     public NetworkBackend CurrentBackend => _config.Backend;
     public NetworkMode Mode => _mode;
     public ulong CurrentTick => _currentTick;
+    public IReadOnlyDictionary<long, PlayerEntity> NetworkedPlayers => _networkedPlayers;
 
     public override void _Ready()
     {
@@ -60,6 +70,12 @@ public partial class NetworkService : BaseService,
 
     public override void _Process(double delta)
     {
+        // Update Steam adapter if it's the current backend
+        if (_adapter is SteamNetworkAdapter steamAdapter)
+        {
+            steamAdapter.Update();
+        }
+
         if (!IsServer) return;
 
         // Run fixed-tick simulation loop on server
@@ -78,6 +94,43 @@ public partial class NetworkService : BaseService,
         {
             StartLocalServer();
         }
+    }
+
+    public void OnGameEvent(SceneLoadEvent eventArgs)
+    {
+        // When a new gameplay scene is loaded in multiplayer, spawn players for all connected peers
+        if (IsServer && !string.Equals(eventArgs.ScenePath, "res://scenes/ui/MainMenu.tscn", System.StringComparison.OrdinalIgnoreCase))
+        {
+            ConsoleSystem.Log($"[NetworkService] Scene loaded in multiplayer: {eventArgs.ScenePath}, spawning all players", ConsoleChannel.Network);
+            
+            // Give the scene a moment to initialize - use CallDeferred to ensure we're in the proper context
+            CallDeferred(MethodName.SpawnAllPlayers);
+        }
+    }
+
+    private void SpawnAllPlayers()
+    {
+        if (!IsServer) return;
+
+        ConsoleSystem.Log("[NetworkService] Spawning all players after scene load", ConsoleChannel.Network);
+
+        // Spawn local player (peer ID 1 for server)
+        SpawnPlayerForClient(1);
+        
+        // Spawn all connected remote clients
+        foreach (var clientId in _connectedClients.Keys.ToArray())
+        {
+            if (clientId != 1) // Skip server/local player
+            {
+                SpawnPlayerForClient(clientId);
+            }
+        }
+    }
+
+    public void OnGameEvent(LobbyStartedEvent eventArgs)
+    {
+        // When lobby starts, lock it so no new players can join during game
+        ConsoleSystem.Log("[NetworkService] Lobby started, locking multiplayer session", ConsoleChannel.Network);
     }
 
     #region Server Methods
@@ -207,15 +260,136 @@ public partial class NetworkService : BaseService,
     {
         ConsoleSystem.Log($"[NetworkService] Peer disconnected: {peerId}", ConsoleChannel.Network);
 
+        // Remove the player entity
+        RemovePlayerForClient(peerId);
+
         _connectedClients.Remove(peerId);
         GameEvent.DispatchGlobal(new NetworkClientDisconnectedEvent(peerId));
     }
 
     private void SendHandshake(long peerId)
     {
-        // TODO: Implement protocol handshake with mod requirements
-        // For now, just acknowledge connection
+        // Acknowledge connection
         ConsoleSystem.Log($"[NetworkService] Sending handshake to peer {peerId}", ConsoleChannel.Network);
+
+        // Spawn player entity for the new client
+        SpawnPlayerForClient(peerId);
+    }
+
+    /// <summary>
+    /// Spawns a player entity for a newly connected client.
+    /// </summary>
+    private void SpawnPlayerForClient(long peerId)
+    {
+        if (!IsServer) return;
+
+        try
+        {
+            // Verify we have a valid scene tree
+            var tree = GetTree();
+            if (tree == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] GetTree() returned null, cannot spawn player", ConsoleChannel.Network);
+                return;
+            }
+
+            var currentScene = tree.CurrentScene;
+            if (currentScene == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] CurrentScene is null, cannot spawn player", ConsoleChannel.Network);
+                return;
+            }
+
+            // Find a spawn point (for now, just use origin with some offset)
+            var spawnPosition = new Vector3(peerId * 2, 2, 0); // Offset each player slightly
+
+            // Load the player scene
+            var playerScene = GD.Load<PackedScene>("res://scenes/Player.tscn");
+            if (playerScene == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] Could not load Player scene", ConsoleChannel.Network);
+                return;
+            }
+
+            // Instance the player
+            var playerInstance = playerScene.Instantiate<PlayerEntity>();
+            if (playerInstance == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] Failed to instantiate player", ConsoleChannel.Network);
+                return;
+            }
+
+            // Set player properties
+            playerInstance.Name = $"Player_{peerId}";
+            
+            // Set network authority BEFORE adding to tree
+            try
+            {
+                playerInstance.SetMultiplayerAuthority((int)peerId);
+                ConsoleSystem.Log($"[NetworkService] Set multiplayer authority for peer {peerId}", ConsoleChannel.Network);
+            }
+            catch (Exception authEx)
+            {
+                ConsoleSystem.LogErr($"[NetworkService] Failed to set multiplayer authority: {authEx.Message}", ConsoleChannel.Network);
+            }
+
+            // Add to the scene tree
+            currentScene.AddChild(playerInstance);
+
+            // Set position after adding to tree
+            playerInstance.GlobalPosition = spawnPosition;
+
+            // Track the player
+            _networkedPlayers[peerId] = playerInstance;
+
+            ConsoleSystem.Log($"[NetworkService] Spawned player for peer {peerId} at {spawnPosition}", ConsoleChannel.Network);
+
+            // Register player with voice chat service
+            var voiceChatService = GetNodeOrNull<VoiceChatService>("/root/VoiceChatService");
+            if (voiceChatService != null)
+            {
+                voiceChatService.RegisterNetworkPlayer(peerId, playerInstance);
+            }
+
+            // Notify other clients about the new player
+            GameEvent.DispatchGlobal(new NetworkPlayerSpawnedEvent(peerId, spawnPosition, $"Player_{peerId}"));
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Failed to spawn player for peer {peerId}: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    /// <summary>
+    /// Removes a player entity when a client disconnects.
+    /// </summary>
+    private void RemovePlayerForClient(long peerId)
+    {
+        if (_networkedPlayers.TryGetValue(peerId, out var player))
+        {
+            // Unregister from voice chat service first
+            var voiceChatService = GetNodeOrNull<VoiceChatService>("/root/VoiceChatService");
+            if (voiceChatService != null)
+            {
+                voiceChatService.UnregisterNetworkPlayer(peerId);
+            }
+
+            player.QueueFree();
+            _networkedPlayers.Remove(peerId);
+
+            ConsoleSystem.Log($"[NetworkService] Removed player for peer {peerId}", ConsoleChannel.Network);
+
+            // Notify other clients about the player leaving
+            GameEvent.DispatchGlobal(new NetworkPlayerRemovedEvent(peerId));
+        }
+    }
+
+    /// <summary>
+    /// Gets a player entity by peer ID.
+    /// </summary>
+    public PlayerEntity GetPlayerEntity(long peerId)
+    {
+        return _networkedPlayers.GetValueOrDefault(peerId);
     }
 
     #endregion
@@ -333,20 +507,35 @@ public partial class NetworkService : BaseService,
     /// </summary>
     public void Disconnect()
     {
+        // Skip if we're not in a network mode
+        if (Mode == NetworkMode.None)
+        {
+            ConsoleSystem.Log("[NetworkService] Already disconnected, nothing to do", ConsoleChannel.Network);
+            return;
+        }
+
         var multiplayer = GetTree().GetMultiplayer();
         if (multiplayer != null && multiplayer.MultiplayerPeer != null)
         {
-            // Disconnect signals
-            if (IsServer)
+            // Disconnect signals - use try-catch to handle cases where they weren't connected
+            try
             {
-                multiplayer.PeerConnected -= OnPeerConnected;
-                multiplayer.PeerDisconnected -= OnPeerDisconnected;
+                if (IsServer)
+                {
+                    multiplayer.PeerConnected -= OnPeerConnected;
+                    multiplayer.PeerDisconnected -= OnPeerDisconnected;
+                }
+                else
+                {
+                    multiplayer.ConnectedToServer -= OnConnectedToServer;
+                    multiplayer.ConnectionFailed -= OnConnectionFailed;
+                    multiplayer.ServerDisconnected -= OnServerDisconnected;
+                }
             }
-            else
+            catch (System.Exception ex)
             {
-                multiplayer.ConnectedToServer -= OnConnectedToServer;
-                multiplayer.ConnectionFailed -= OnConnectionFailed;
-                multiplayer.ServerDisconnected -= OnServerDisconnected;
+                // Signals weren't connected, which is fine
+                ConsoleSystem.Log($"[NetworkService] Note: Some signals weren't connected during disconnect: {ex.Message}", ConsoleChannel.Network);
             }
 
             multiplayer.MultiplayerPeer = null;
@@ -372,7 +561,7 @@ public partial class NetworkService : BaseService,
             MaxPlayers = 32,
             TickRate = 30,
             SnapshotRate = 20,
-            AutoStartLocalServer = true,
+            AutoStartLocalServer = false, // Don't auto-start; let explicit SP/MP flow handle it
             EnableCompression = true,
             InterpolationDelay = 100, // ms
             Backend = NetworkBackend.ENet
@@ -412,6 +601,70 @@ public partial class NetworkService : BaseService,
                 string address = args[0];
                 int port = args.Length > 1 && int.TryParse(args[1], out var p) ? p : 0;
                 return ConnectToServer(address, port);
+            }));
+
+        // Multiplayer testing commands
+        consoleSystem.RegisterCommand(new ConsoleCommand(
+            "net_create_lobby",
+            "Create a Steam lobby for multiplayer",
+            "net_create_lobby [max_players]",
+            async (args) =>
+            {
+                int maxPlayers = args.Length > 0 && int.TryParse(args[0], out var p) ? p : 8;
+
+                if (!PlatformService.IsSteamInitialized)
+                {
+                    ConsoleSystem.LogErr("Steam is not initialized. Make sure Steam is running.", ConsoleChannel.Network);
+                    return false;
+                }
+
+                // Switch to Steam backend if not already
+                if (_config.Backend != NetworkBackend.Steam)
+                {
+                    _config.Backend = NetworkBackend.Steam;
+                    InitializeAdapter();
+                    ConsoleSystem.Log("Switched to Steam networking backend", ConsoleChannel.Network);
+                }
+
+                var success = StartServer(0);
+                if (success)
+                {
+                    var steamAdapter = _adapter as SteamNetworkAdapter;
+                    if (steamAdapter != null)
+                    {
+                        ConsoleSystem.Log($"Steam lobby created! Join code: {steamAdapter.GetLobbyJoinCode()}", ConsoleChannel.Network);
+                    }
+                }
+                return success;
+            }));
+
+        consoleSystem.RegisterCommand(new ConsoleCommand(
+            "net_join_lobby",
+            "Join a Steam lobby using join code",
+            "net_join_lobby <join_code>",
+            async (args) =>
+            {
+                if (args.Length == 0)
+                {
+                    ConsoleSystem.Log("Usage: net_join_lobby <join_code>", ConsoleChannel.Network);
+                    return false;
+                }
+
+                if (!PlatformService.IsSteamInitialized)
+                {
+                    ConsoleSystem.LogErr("Steam is not initialized. Make sure Steam is running.", ConsoleChannel.Network);
+                    return false;
+                }
+
+                // Switch to Steam backend if not already
+                if (_config.Backend != NetworkBackend.Steam)
+                {
+                    _config.Backend = NetworkBackend.Steam;
+                    InitializeAdapter();
+                    ConsoleSystem.Log("Switched to Steam networking backend", ConsoleChannel.Network);
+                }
+
+                return ConnectToServer(args[0], 0);
             }));
 
         consoleSystem.RegisterCommand(new ConsoleCommand(

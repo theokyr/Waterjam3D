@@ -37,6 +37,7 @@ public partial class ConsoleSystem : Node,
         instance = this;
         _mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
         RegisterBaseCommands();
+        ConsoleInputCommands.RegisterAll(this);
         InitializeLogging();
         TryParseCommandLine();
         InitializeMcpInbox();
@@ -130,6 +131,24 @@ public partial class ConsoleSystem : Node,
                 GameEvent.DispatchGlobal(new ConsoleHistoryClearedEvent());
                 return true;
             }
+        ));
+
+        RegisterCommand(new ConsoleCommand(
+            "quit",
+            "Quits the game",
+            "quit",
+            async (_) =>
+            {
+                GameEvent.DispatchGlobal(new QuitRequestedEvent());
+                return true;
+            }
+        ));
+
+        RegisterCommand(new ConsoleCommand(
+            "exit",
+            "Alias for quit",
+            "exit",
+            async (args) => await ExecuteCommand("quit")
         ));
 
         RegisterCommand(new ConsoleCommand(

@@ -17,3 +17,8 @@ public record LoadingScreenShowEvent(float InitialProgress = 0.1f, string Messag
 public record LoadingScreenUpdateEvent(float Progress, string Message) : IGameEvent;
 
 public record LoadingScreenHideEvent : IGameEvent;
+
+// Screen navigation intents for UI
+public record UiShowMainMenuEvent : IGameEvent;
+public record UiShowPartyScreenEvent : IGameEvent;
+public record UiShowLobbyScreenEvent : IGameEvent;

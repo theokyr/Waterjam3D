@@ -22,7 +22,9 @@ public partial class SystemRegistry : BaseService
     private readonly Dictionary<string, IGameSystem> _loadedSystems = new();
     private readonly Dictionary<string, SystemManifest> _availableManifests = new();
     private readonly Dictionary<string, Node> _systemNodes = new();
+    // Mod assembly loaders (for code mod systems)
     private readonly Dictionary<string, ModAssemblyLoader> _assemblyLoaders = new();
+
 
     // Services and components
     private readonly DependencyResolver _dependencyResolver = new();

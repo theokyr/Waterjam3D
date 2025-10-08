@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Reflection;
 using Godot;
 using Waterjam.Core.Systems.Console;
@@ -69,28 +70,50 @@ public static class GameEvent
 
     private static void DispatchToHandlers<T>(IGameEventHandler<T>[] handlers, T eventArgs) where T : IGameEvent
     {
-        if (!HandlerOrderingCache.TryGetValue(typeof(T), out var ordering) || handlers.Any(x => !ordering.ContainsKey(x.GetType())))
-            ordering = HandlerOrderingCache[typeof(T)] = GetHandlerOrdering(handlers);
+        var uniqueTypeCount = handlers.Select(h => h.GetType()).Distinct().Count();
 
-        List<Exception> exceptions = null;
+        if (!HandlerOrderingCache.TryGetValue(typeof(T), out var ordering)
+            || ordering.Count != uniqueTypeCount
+            || handlers.Any(x => !ordering.ContainsKey(x.GetType())))
+        {
+            ordering = GetHandlerOrdering(handlers);
+            HandlerOrderingCache[typeof(T)] = ordering;
+        }
 
-        foreach (var handler in handlers.OrderBy(h => ordering[h.GetType()]))
+        var exceptions = (List<(Type HandlerType, Exception Error)>)null;
+
+        var orderedHandlers = handlers
+            .OrderBy(h => ordering.TryGetValue(h.GetType(), out var order) ? order : int.MaxValue)
+            .ToArray();
+
+        foreach (var handler in orderedHandlers)
+        {
             try
             {
                 handler.OnGameEvent(eventArgs);
             }
             catch (Exception e)
             {
-                exceptions ??= new List<Exception>();
-                exceptions.Add(e);
+                exceptions ??= new List<(Type, Exception)>();
+                exceptions.Add((handler.GetType(), e));
             }
+        }
 
         if (exceptions != null)
         {
             if (exceptions.Count == 1)
-                ConsoleSystem.LogErr(exceptions[0].Message, ConsoleChannel.Entity);
+            {
+                var (handlerType, error) = exceptions[0];
+                ConsoleSystem.LogErr($"Exception in {handlerType.Name} while handling {typeof(T).Name}: {error}", ConsoleChannel.Entity);
+            }
             else
-                ConsoleSystem.LogErr(new AggregateException(exceptions).Message, ConsoleChannel.Entity);
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"Multiple exceptions while dispatching {typeof(T).Name} ({exceptions.Count}):");
+                foreach (var (handlerType, error) in exceptions)
+                    sb.AppendLine($" - {handlerType.Name}: {error.Message}\n{error.StackTrace}");
+                ConsoleSystem.LogErr(sb.ToString(), ConsoleChannel.Entity);
+            }
         }
     }
 
@@ -112,22 +135,24 @@ public static class GameEvent
 
     private static IReadOnlyDictionary<Type, int> GetHandlerOrdering<T>(IGameEventHandler<T>[] handlers) where T : IGameEvent
     {
-        var types = handlers.Select(h => h.GetType()).ToArray();
+        // Use unique handler types for ordering to avoid duplicate-key issues.
+        var types = handlers.Select(h => h.GetType()).Distinct().ToArray();
         var helper = new SortingHelper(types.Length);
 
         for (var i = 0; i < types.Length; ++i)
         {
             var type = types[i];
 
-            var method = type.GetMethod("OnGameEvent", BindingFlags.Instance | BindingFlags.Public, null, new Type[] { typeof(T) }, null);
+            var method = ResolveHandlerMethod<T>(type);
 
             if (method == null)
             {
-                ConsoleSystem.LogErr($"Can't find IGameEventHandler<{typeof(T).Name}> implementation in {type.Name}!");
+                ConsoleSystem.LogErr($"Can't resolve IGameEventHandler<{typeof(T).Name}> implementation in {type.Name}!");
                 continue;
             }
 
             foreach (var attrib in method.GetCustomAttributes(true))
+            {
                 switch (attrib)
                 {
                     case EarlyAttribute:
@@ -143,7 +168,6 @@ public static class GameEvent
                             var other = types[j];
                             if (before.Type.IsAssignableFrom(other)) helper.AddConstraint(i, j);
                         }
-
                         break;
                     case AfterAttribute after:
                         for (var j = 0; j < types.Length; ++j)
@@ -152,21 +176,68 @@ public static class GameEvent
                             var other = types[j];
                             if (after.Type.IsAssignableFrom(other)) helper.AddConstraint(j, i);
                         }
-
                         break;
                 }
+            }
         }
 
-        var ordering = new List<int>();
+        var topoOrder = new List<int>();
 
-        if (!helper.Sort(ordering, out var invalid))
+        if (!helper.Sort(topoOrder, out var invalid))
         {
             ConsoleSystem.LogErr($"Invalid event ordering constraint between {types[invalid.EarlierIndex].Name} and {types[invalid.LaterIndex].Name}!");
-            return new Dictionary<Type, int>();
+            // Fallback to stable first-seen BFS type order
+            return BuildStableFallbackOrdering(handlers);
         }
 
-        return ordering.Select((order, index) => (types[index], order))
-            .ToDictionary(x => x.Item1, x => x.order);
+        var map = new Dictionary<Type, int>(types.Length);
+        for (var rank = 0; rank < topoOrder.Count; ++rank)
+        {
+            var typeIndex = topoOrder[rank];
+            map[types[typeIndex]] = rank;
+        }
+
+        return map;
+    }
+
+    private static MethodInfo ResolveHandlerMethod<T>(Type type) where T : IGameEvent
+    {
+        var interfaceType = typeof(IGameEventHandler<T>);
+        try
+        {
+            var interfaceMethod = interfaceType.GetMethod(nameof(IGameEventHandler<T>.OnGameEvent));
+            var map = type.GetInterfaceMap(interfaceType);
+            for (var i = 0; i < map.InterfaceMethods.Length; i++)
+            {
+                if (map.InterfaceMethods[i] == interfaceMethod)
+                    return map.TargetMethods[i];
+            }
+        }
+        catch
+        {
+            // ignored; fall back to name-based search
+        }
+
+        // Fallback: try both public and non-public instance methods named OnGameEvent with parameter T
+        return type.GetMethod(
+            "OnGameEvent",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            new Type[] { typeof(T) },
+            null);
+    }
+
+    private static IReadOnlyDictionary<Type, int> BuildStableFallbackOrdering<T>(IGameEventHandler<T>[] handlers) where T : IGameEvent
+    {
+        var map = new Dictionary<Type, int>();
+        var rank = 0;
+        foreach (var type in handlers.Select(h => h.GetType()))
+        {
+            if (!map.ContainsKey(type))
+                map[type] = rank++;
+        }
+
+        return map;
     }
 }
 

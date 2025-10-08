@@ -1,0 +1,130 @@
+[gd_scene load_steps=3 format=3 uid="uid://c8y9z0a1b2c3d4e5f6g7"]
+
+[ext_resource type="Script" path="res://scripts/ui/LobbyUI.cs" id="1"]
+[ext_resource type="Theme" uid="uid://d9z0a1b2c3d4e5f6g7h8" path="res://resources/ui/GlobalTheme.tres" id="2"]
+
+[node name="LobbyUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2")
+script = ExtResource("1")
+
+[node name="Panel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Game Lobby"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LeftPanel" type="VBoxContainer" parent="Panel/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LobbyInfo" type="VBoxContainer" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel"]
+layout_mode = 2
+
+[node name="LobbyName" type="Label" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel/LobbyInfo"]
+layout_mode = 2
+text = "Lobby: "
+
+[node name="PlayersCount" type="Label" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel/LobbyInfo"]
+layout_mode = 2
+text = "Players: 0/8"
+
+[node name="Status" type="Label" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel/LobbyInfo"]
+layout_mode = 2
+text = "Status: Waiting"
+
+[node name="PlayersList" type="ItemList" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="PlayerActions" type="VBoxContainer" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel"]
+layout_mode = 2
+
+[node name="ReadyButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel/PlayerActions"]
+layout_mode = 2
+text = "Ready"
+
+[node name="LeaveLobbyButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer/LeftPanel/PlayerActions"]
+layout_mode = 2
+text = "Leave Lobby"
+
+[node name="RightPanel" type="VBoxContainer" parent="Panel/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Settings" type="VBoxContainer" parent="Panel/VBoxContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SettingsTitle" type="Label" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/Settings"]
+layout_mode = 2
+text = "Settings"
+horizontal_alignment = 1
+
+[node name="MapLabel" type="Label" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/Settings"]
+layout_mode = 2
+text = "Map: "
+
+[node name="GameModeLabel" type="Label" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/Settings"]
+layout_mode = 2
+text = "Game Mode: "
+
+[node name="DifficultyLabel" type="Label" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/Settings"]
+layout_mode = 2
+text = "Difficulty: "
+
+[node name="LeaderActions" type="VBoxContainer" parent="Panel/VBoxContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LeaderTitle" type="Label" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/LeaderActions"]
+layout_mode = 2
+text = "Leader Actions"
+horizontal_alignment = 1
+visible = false
+
+[node name="ChangeLeaderButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/LeaderActions"]
+layout_mode = 2
+text = "Change Leader"
+visible = false
+
+[node name="StartGameButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer/RightPanel/LeaderActions"]
+layout_mode = 2
+text = "Start Game"
+visible = false
+
+[node name="CloseButton" type="Button" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Close"
+
+[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/LeftPanel/PlayerActions/ReadyButton" to="." method="_on_ready_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/LeftPanel/PlayerActions/LeaveLobbyButton" to="." method="_on_leave_lobby_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/RightPanel/LeaderActions/ChangeLeaderButton" to="." method="_on_change_leader_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/RightPanel/LeaderActions/StartGameButton" to="." method="_on_start_game_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/CloseButton" to="." method="_on_close_pressed"]
