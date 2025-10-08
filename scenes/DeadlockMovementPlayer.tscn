@@ -1,0 +1,27 @@
+[gd_scene load_steps=5 format=3 uid="uid://dv3wpnkfu2gnq"]
+
+[ext_resource type="Script" uid="uid://drcpcvamai2to" path="res://scripts/core/movement/SimpleThirdPersonController.cs" id="1"]
+[ext_resource type="Script" uid="uid://cs5fddubxgmhu" path="res://scripts/core/movement/StaminaComponent.cs" id="2"]
+
+[sub_resource type="CapsuleShape3D" id="1"]
+
+[sub_resource type="CapsuleMesh" id="2"]
+radius = 0.4
+height = 1.6
+
+[node name="Player" type="CharacterBody3D"]
+script = ExtResource("1")
+JumpVelocity = 10.0
+DashDuration = 1.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("2")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+current = true
+
+[node name="StaminaComponent" type="Node" parent="."]
+script = ExtResource("2")

@@ -1,0 +1,171 @@
+[gd_scene load_steps=25 format=3 uid="uid://c0vydijnuig1g"]
+
+[ext_resource type="Script" uid="uid://ciadvc2apncv" path="res://scripts/core/movement/DeadlockMovementPlayer.cs" id="1_5uqgb"]
+[ext_resource type="Script" uid="uid://dmqx725u02yet" path="res://scripts/core/movement/ThirdPersonCamera.cs" id="2_rxyb1"]
+[ext_resource type="Script" uid="uid://ydgk5o0ix2ke" path="res://scripts/core/movement/MovementComponent.cs" id="3_osnlg"]
+[ext_resource type="Script" uid="uid://cs5fddubxgmhu" path="res://scripts/core/movement/StaminaComponent.cs" id="4_x4dv7"]
+[ext_resource type="Script" uid="uid://rwblpeytcwee" path="res://scripts/core/movement/DashComponent.cs" id="5_hdv4t"]
+[ext_resource type="Script" uid="uid://cshofhnb4dseb" path="res://scripts/core/movement/InputBuffer.cs" id="6_56jcm"]
+[ext_resource type="Script" uid="uid://dtldmwp4muddh" path="res://scripts/core/movement/WallJumpComponent.cs" id="7_swt18"]
+[ext_resource type="Script" uid="uid://lo4pumxloe82" path="res://scripts/core/movement/MantleComponent.cs" id="8_ka6mk"]
+[ext_resource type="Script" uid="uid://b321jvn13hav" path="res://scripts/core/movement/SlideComponent.cs" id="9_ncyc2"]
+[ext_resource type="Script" uid="uid://dtrbit7uv24yy" path="res://scripts/core/movement/CrouchComponent.cs" id="10_nt504"]
+[ext_resource type="Script" uid="uid://c6oemf6pnql7h" path="res://scripts/ui/MovementUI.cs" id="11_nwnmb"]
+
+[sub_resource type="StandardMaterial3D" id="Material_ground"]
+albedo_color = Color(0.2, 0.6, 0.2, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(20, 1, 20)
+
+[sub_resource type="StandardMaterial3D" id="Material_wall"]
+albedo_color = Color(0.6, 0.3, 0.1, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall"]
+size = Vector3(1, 5, 10)
+
+[sub_resource type="StandardMaterial3D" id="Material_platform"]
+albedo_color = Color(0.3, 0.3, 0.8, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_platform"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_platform"]
+size = Vector3(3, 0.5, 3)
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_player"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_stamina_bg"]
+bg_color = Color(0.2, 0.2, 0.2, 0.8)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_stamina_fg"]
+bg_color = Color(0.2, 0.8, 0.2, 1)
+
+[node name="DeadlockMovementTestEnvironment" type="Node3D"]
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+material_override = SubResource("Material_ground")
+mesh = SubResource("BoxMesh_ground")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="Wall1" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 2.5, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Wall1"]
+material_override = SubResource("Material_wall")
+mesh = SubResource("BoxMesh_wall")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Wall1"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="Wall2" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 2.5, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Wall2"]
+material_override = SubResource("Material_wall")
+mesh = SubResource("BoxMesh_wall")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Wall2"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="Platform1" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -3)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Platform1"]
+material_override = SubResource("Material_platform")
+mesh = SubResource("BoxMesh_platform")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Platform1"]
+shape = SubResource("BoxShape3D_platform")
+
+[node name="Platform2" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.5, -6)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Platform2"]
+material_override = SubResource("Material_platform")
+mesh = SubResource("BoxMesh_platform")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Platform2"]
+shape = SubResource("BoxShape3D_platform")
+
+[node name="DeadlockMovementPlayer" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+script = ExtResource("1_5uqgb")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DeadlockMovementPlayer"]
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="DeadlockMovementPlayer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("BoxMesh_player")
+
+[node name="Camera3D" type="Camera3D" parent="DeadlockMovementPlayer"]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 3, 5)
+script = ExtResource("2_rxyb1")
+
+[node name="MovementComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("3_osnlg")
+
+[node name="StaminaComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("4_x4dv7")
+
+[node name="DashComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("5_hdv4t")
+
+[node name="InputBuffer" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("6_56jcm")
+
+[node name="WallJumpComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("7_swt18")
+
+[node name="MantleComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("8_ka6mk")
+
+[node name="SlideComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("9_ncyc2")
+
+[node name="CrouchComponent" type="Node" parent="DeadlockMovementPlayer"]
+script = ExtResource("10_nt504")
+
+[node name="MovementUI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("11_nwnmb")
+
+[node name="SpeedLabel" type="Label" parent="MovementUI"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 150.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 24
+text = "Speed: 0.00 m/s"
+
+[node name="StaminaBar" type="ProgressBar" parent="MovementUI"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 80.0
+offset_right = 220.0
+offset_bottom = 110.0
+theme_override_styles/background = SubResource("StyleBoxFlat_stamina_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_stamina_fg")
+value = 100.0
+show_percentage = false
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 10, 0)
+shadow_enabled = true

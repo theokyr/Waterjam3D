@@ -3,11 +3,11 @@
         "godot": {
             "command": "node",
             "args": [
-                "C:\\Progs\\godot-mcp\\build\\index.js"
+                "E:\\Gamedev\\Solodev\\GodotProjects\\godot-mcp\\godot-mcp\\build\\index.js"
             ],
             "env": {
                 "DEBUG": "true",
-                "GODOT_PATH": "C:\\Progs\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe"
+                "GODOT_PATH": "E:\\Gamedev\\Solodev\\Godot\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe"
             },
             "disabled": false,
             "autoApprove": [
