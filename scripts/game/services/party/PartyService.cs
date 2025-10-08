@@ -28,6 +28,7 @@ public partial class PartyService : BaseService,
 
     private string _localPlayerId;
     private Random _random = new();
+    private ulong _currentSteamLobbyId = 0; // Track the current party's Steam lobby ID for invites
 
     public override void _Ready()
     {
@@ -67,7 +68,79 @@ public partial class PartyService : BaseService,
     {
         // Listen for Steam lobby events that affect party management
         Steam.LobbyChatUpdate += OnSteamLobbyChatUpdate;
+        Steam.LobbyCreated += OnSteamLobbyCreated;
+        Steam.LobbyJoined += OnSteamLobbyJoined;
+        // TODO: Add LobbyDataUpdate for navigation messages once signature is resolved
     }
+
+    private void OnSteamLobbyCreated(long result, ulong lobbyId)
+    {
+        if (result == 1) // k_EResultOK
+        {
+            _currentSteamLobbyId = lobbyId;
+            ConsoleSystem.Log($"[PartyService] Steam lobby created for party: {lobbyId}", ConsoleChannel.Game);
+            
+            // Set lobby type to party so peers know this is a party lobby
+            Steam.SetLobbyData(lobbyId, "lobby_type", "party");
+            
+            // Store party info
+            var party = GetCurrentPlayerParty();
+            if (party != null)
+            {
+                Steam.SetLobbyData(lobbyId, "party_id", party.PartyId);
+                Steam.SetLobbyData(lobbyId, "party_name", party.DisplayName);
+                Steam.SetLobbyData(lobbyId, "party_code", party.PartyCode);
+            }
+        }
+        else
+        {
+            ConsoleSystem.LogErr($"[PartyService] Failed to create Steam lobby: result {result}", ConsoleChannel.Game);
+        }
+    }
+
+    private void OnSteamLobbyJoined(ulong lobbyId, long permissions, bool locked, long response)
+    {
+        if (response != 1) return; // Only proceed if join was successful
+        
+        // Check if this is a party lobby
+        var lobbyType = Steam.GetLobbyData(lobbyId, "lobby_type");
+        if (lobbyType == "party")
+        {
+            var partyId = Steam.GetLobbyData(lobbyId, "party_id");
+            var partyName = Steam.GetLobbyData(lobbyId, "party_name");
+            var partyCode = Steam.GetLobbyData(lobbyId, "party_code");
+            
+            if (!string.IsNullOrEmpty(partyId) && !_parties.ContainsKey(partyId))
+            {
+                // We joined a party lobby - create local party state
+                var hostSteamId = Steam.GetLobbyOwner(lobbyId);
+                var hostId = hostSteamId.ToString();
+                
+                var party = new Waterjam.Domain.Party.Party(partyId, partyCode, hostId, partyName);
+                _parties[partyId] = party;
+                _playerPartyMap[_localPlayerId] = partyId;
+                _currentSteamLobbyId = lobbyId;
+                
+                // Add ourselves as a member
+                var localName = Steam.GetPersonaName();
+                var localMember = new Waterjam.Domain.Party.PartyMember(_localPlayerId, false, localName);
+                party.AddMember(localMember);
+                
+                // Create chat channel
+                var chatChannel = new ChatChannel(partyId, $"Party: {party.DisplayName}", ChatChannelType.Party);
+                _partyChatChannels[partyId] = chatChannel;
+                
+                ConsoleSystem.Log($"[PartyService] Joined party '{partyName}' via Steam lobby", ConsoleChannel.Game);
+                GameEvent.DispatchGlobal(new PartyJoinedEvent(partyId, _localPlayerId));
+            }
+        }
+    }
+
+    // TODO: Re-implement lobby navigation sync with correct Steam callback signature
+    // private void OnSteamLobbyDataUpdate(ulong lobbyId)
+    // {
+    //     // Check for lobby navigation message and dispatch UiShowLobbyScreenEvent
+    // }
 
     public override void _Process(double delta)
     {
@@ -77,6 +150,14 @@ public partial class PartyService : BaseService,
         {
             Steam.RunCallbacks();
         }
+    }
+
+    /// <summary>
+    /// Gets the current Steam lobby ID for the party (for invites).
+    /// </summary>
+    public ulong GetCurrentSteamLobbyId()
+    {
+        return _currentSteamLobbyId;
     }
 
     /// <summary>
@@ -243,7 +324,12 @@ public partial class PartyService : BaseService,
 
             ConsoleSystem.Log($"Created party '{party.DisplayName}' with code '{partyCode}'", ConsoleChannel.Game);
 
-            // Note: Parties are social groups only. Steam lobbies are created when starting a game session.
+            // Create a Steam lobby for social/invite purposes
+            // This lobby will be reused for networking when the game starts
+            if (PlatformService.IsSteamInitialized)
+            {
+                CreateSteamLobby(party, eventArgs.MaxMembers);
+            }
 
             GameEvent.DispatchGlobal(new PartyCreatedEvent(partyId, partyCode, _localPlayerId, party.DisplayName));
         }
@@ -438,7 +524,12 @@ public partial class PartyService : BaseService,
 
                 ConsoleSystem.Log($"[PartyService] Auto-created party '{displayName}' to send invite.", ConsoleChannel.Game);
 
-                // Note: Parties are social groups only. Steam lobbies are created when starting a game session.
+                // Create a Steam lobby for social/invite purposes
+                // This lobby will be reused for networking when the game starts
+                if (PlatformService.IsSteamInitialized)
+                {
+                    CreateSteamLobby(party, 8); // Default max 8 players
+                }
 
                 GameEvent.DispatchGlobal(new PartyCreatedEvent(partyId, partyCode, _localPlayerId, displayName));
             }

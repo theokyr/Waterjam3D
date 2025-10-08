@@ -144,6 +144,17 @@ public partial class PlatformService : BaseService
                     IsSteamInitialized = true;
                     Adapter = new SteamPlatformAdapter();
                     ConsoleSystem.Log($"Steam initialized. Status={status}; App ID: {appId}; LoggedOn={loggedOn}; SteamID={steamId}; {verbal}", ConsoleChannel.Game);
+                    
+                    // Wire up Steam invite callback
+                    try
+                    {
+                        Steam.JoinRequested += OnSteamJoinRequested;
+                        ConsoleSystem.Log("[PlatformService] Steam JoinRequested callback registered", ConsoleChannel.Game);
+                    }
+                    catch (Exception callbackEx)
+                    {
+                        ConsoleSystem.LogWarn($"[PlatformService] Failed to register JoinRequested callback: {callbackEx.Message}", ConsoleChannel.Game);
+                    }
                 }
                 else
                 {
@@ -410,6 +421,25 @@ public partial class PlatformService : BaseService
         catch (Exception ex)
         {
             ConsoleSystem.LogErr($"[Reconnect] Error: {ex.Message}", ConsoleChannel.Game);
+        }
+    }
+
+    /// <summary>
+    /// Handles Steam invite acceptance - when a player clicks "Join Game" from Steam overlay or accepts an invite
+    /// </summary>
+    private void OnSteamJoinRequested(ulong lobbyId, ulong friendId)
+    {
+        ConsoleSystem.Log($"[PlatformService] Steam join requested! Lobby: {lobbyId}, From Friend: {friendId}", ConsoleChannel.Game);
+        
+        try
+        {
+            // Join the Steam lobby - this will trigger the LobbyJoined callback in SteamNetworkAdapter
+            Steam.JoinLobby(lobbyId);
+            ConsoleSystem.Log($"[PlatformService] Joining Steam lobby {lobbyId}...", ConsoleChannel.Game);
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[PlatformService] Failed to join lobby via invite: {ex.Message}", ConsoleChannel.Network);
         }
     }
 }

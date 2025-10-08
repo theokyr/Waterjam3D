@@ -13,7 +13,8 @@ using GodotSteam;
 
 namespace Waterjam.UI;
 
-public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>, IGameEventHandler<UiShowPartyScreenEvent>, IGameEventHandler<UiShowMainMenuEvent>, IGameEventHandler<UiShowLobbyScreenEvent>
+public partial class MainMenu : Control,
+	IGameEventHandler<LobbyCreatedEvent>, IGameEventHandler<DisplaySettingsEvent>, IGameEventHandler<UiShowPartyScreenEvent>, IGameEventHandler<UiShowMainMenuEvent>, IGameEventHandler<UiShowLobbyScreenEvent>
 {
     private GameService _gameService;
     private VBoxContainer _menuButtons;
@@ -171,8 +172,18 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
 		var displayName = !string.IsNullOrWhiteSpace(personaName) ? $"{personaName}'s Lobby" : "My Lobby";
 		var settings = new LobbySettings();
 
-		// Switch NetworkService to Steam backend and start server (creates Steam lobby)
-		ConsoleSystem.Log("[MainMenu] Starting multiplayer: creating Steam lobby...", ConsoleChannel.UI);
+		// Switch NetworkService to Steam backend and start server
+		// If a party already has a Steam lobby, we'll reuse it; otherwise create a new one
+		var existingLobbyId = partyService.GetCurrentSteamLobbyId();
+		if (existingLobbyId != 0)
+		{
+			ConsoleSystem.Log($"[MainMenu] Reusing existing Steam lobby {existingLobbyId} from party", ConsoleChannel.UI);
+		}
+		else
+		{
+			ConsoleSystem.Log("[MainMenu] Starting multiplayer: creating new Steam lobby...", ConsoleChannel.UI);
+		}
+		
 		try
 		{
 			// Disconnect any existing local server connection first
@@ -197,23 +208,38 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
 				}
 			}
 
-			// Start the Steam lobby server
+			// Start the Steam lobby server (only creates a new lobby if one doesn't exist)
 			var started = networkService.StartServer(0);
 			if (!started)
 			{
-				ShowErrorDialog("Multiplayer Failed", "Failed to create Steam lobby. Please try again.");
+				ShowErrorDialog("Multiplayer Failed", "Failed to initialize networking. Please try again.");
 				return;
 			}
 		}
 		catch (System.Exception ex)
 		{
-			ConsoleSystem.LogErr($"[MainMenu] Failed to start Steam lobby: {ex.Message}", ConsoleChannel.Network);
-			ShowErrorDialog("Multiplayer Failed", $"Failed to create Steam lobby: {ex.Message}");
+			ConsoleSystem.LogErr($"[MainMenu] Failed to start networking: {ex.Message}", ConsoleChannel.Network);
+			ShowErrorDialog("Multiplayer Failed", $"Failed to initialize networking: {ex.Message}");
 			return;
 		}
 
 		// Create the game lobby (this manages players and settings)
 		GameEvent.DispatchGlobal(new CreateLobbyRequestEvent(displayName, settings));
+
+		// Notify all party members to navigate to lobby via Steam lobby data
+		if (existingLobbyId != 0)
+		{
+			try
+			{
+				Steam.SetLobbyData(existingLobbyId, "lobby_leader_id", localPlayerId);
+				Steam.SetLobbyData(existingLobbyId, "navigate_to_lobby", "true");
+				ConsoleSystem.Log("[MainMenu] Sent lobby navigation message to all party members", ConsoleChannel.UI);
+			}
+			catch (System.Exception ex)
+			{
+				ConsoleSystem.LogWarn($"[MainMenu] Failed to send lobby navigation message: {ex.Message}", ConsoleChannel.UI);
+			}
+		}
 
 		// Navigate to Lobby UI
 		ShowLobbyUI();
@@ -263,6 +289,27 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
         if (_isInitialized)
             ShowSettings();
     }
+
+	public void OnGameEvent(LobbyCreatedEvent eventArgs)
+	{
+		// When a lobby is created, navigate party members to the lobby screen
+		var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
+		if (partyService != null)
+		{
+			var localPlayerId = partyService.GetLocalPlayerId();
+			// Only navigate if we're a party member but not the one who clicked "Multiplayer"
+			// (the leader already navigates via StartMultiplayerFlow)
+			if (localPlayerId != eventArgs.LeaderPlayerId)
+			{
+				var party = partyService.GetCurrentPlayerParty();
+				if (party != null && party.GetMember(localPlayerId) != null)
+				{
+					ConsoleSystem.Log($"[MainMenu] Party member {localPlayerId} navigating to lobby screen", ConsoleChannel.UI);
+					ShowLobbyUI();
+				}
+			}
+		}
+	}
 
     public override void _ExitTree()
     {

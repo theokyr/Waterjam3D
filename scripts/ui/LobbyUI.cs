@@ -35,6 +35,8 @@ public partial class LobbyUI : Control,
     private Label _mapLabel;
     private Label _gameModeLabel;
     private Label _difficultyLabel;
+	private LineEdit _lobbyCodeInput;
+	private Button _joinByCodeButton;
 
     private string _localPlayerId;
     private bool _startRequested;
@@ -60,6 +62,9 @@ public partial class LobbyUI : Control,
         // Ensure button signals are wired (in case the scene lacks editor connections)
         if (_startGameButton != null) _startGameButton.Pressed += _on_start_game_pressed;
 
+		// Add join-by-code UI at the top
+		CreateJoinByCodeUI();
+
         // Get local player ID from party service (assuming it's set)
         var partyService = GetNode("/root/PartyService") as Waterjam.Game.Services.Party.PartyService;
         if (partyService != null)
@@ -69,6 +74,56 @@ public partial class LobbyUI : Control,
 
         UpdateLobbyDisplay();
     }
+
+	private void CreateJoinByCodeUI()
+	{
+		// Create a container for join-by-code UI at the top of the lobby screen
+		var titleNode = GetNodeOrNull<Label>("Panel/VBoxContainer/Title");
+		if (titleNode == null) return;
+
+		var vbox = titleNode.GetParent() as VBoxContainer;
+		if (vbox == null) return;
+
+		// Create HBox for join by code
+		var joinContainer = new HBoxContainer();
+		joinContainer.Name = "JoinByCodeContainer";
+		joinContainer.CustomMinimumSize = new Vector2(0, 40);
+
+		var label = new Label();
+		label.Text = "Join Lobby by Code:";
+		label.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+		joinContainer.AddChild(label);
+
+		_lobbyCodeInput = new LineEdit();
+		_lobbyCodeInput.PlaceholderText = "Enter lobby code";
+		_lobbyCodeInput.CustomMinimumSize = new Vector2(200, 0);
+		_lobbyCodeInput.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		joinContainer.AddChild(_lobbyCodeInput);
+
+		_joinByCodeButton = new Button();
+		_joinByCodeButton.Text = "Join";
+		_joinByCodeButton.Pressed += OnJoinByCodePressed;
+		joinContainer.AddChild(_joinByCodeButton);
+
+		// Insert after title
+		var titleIndex = titleNode.GetIndex();
+		vbox.AddChild(joinContainer);
+		vbox.MoveChild(joinContainer, titleIndex + 1);
+	}
+
+	private void OnJoinByCodePressed()
+	{
+		var code = _lobbyCodeInput.Text.Trim().ToUpper();
+		if (string.IsNullOrEmpty(code))
+		{
+			GD.PushWarning("No lobby code entered");
+			return;
+		}
+
+		// Dispatch event to join lobby by code
+		GameEvent.DispatchGlobal(new JoinLobbyRequestEvent(code));
+		Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[LobbyUI] Attempting to join lobby with code: {code}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+	}
 
     private void UpdateLobbyDisplay()
     {

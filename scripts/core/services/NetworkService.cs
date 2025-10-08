@@ -19,7 +19,8 @@ namespace Waterjam.Core.Services;
 public partial class NetworkService : BaseService,
     IGameEventHandler<GameInitializedEvent>,
     IGameEventHandler<SceneLoadEvent>,
-    IGameEventHandler<LobbyStartedEvent>
+    IGameEventHandler<LobbyStartedEvent>,
+    IGameEventHandler<NewGameStartedEvent>
 {
     // Configuration
     private NetworkConfig _config;
@@ -108,6 +109,41 @@ public partial class NetworkService : BaseService,
         }
     }
 
+    public void OnGameEvent(NewGameStartedEvent eventArgs)
+    {
+        // When the game starts in multiplayer, the server broadcasts the scene to load to all clients
+        // Note: GameService handles the local scene load, we only need to broadcast to clients here
+        if (IsServer)
+        {
+            // Only send RPC if we have an active multiplayer peer (i.e., not a solo lobby)
+            var multiplayer = GetTree()?.GetMultiplayer();
+            if (multiplayer?.MultiplayerPeer != null && multiplayer.MultiplayerPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+            {
+                ConsoleSystem.Log($"[NetworkService] Broadcasting scene load to all clients: {eventArgs.LevelScenePath}", ConsoleChannel.Network);
+                Rpc(MethodName.RpcLoadScene, eventArgs.LevelScenePath);
+            }
+            else
+            {
+                ConsoleSystem.Log($"[NetworkService] No multiplayer peer active, skipping RPC broadcast (solo lobby)", ConsoleChannel.Network);
+            }
+        }
+    }
+
+    public void OnGameEvent(LobbyStartedEvent eventArgs)
+    {
+        ConsoleSystem.Log("[NetworkService] Lobby started, locking multiplayer session", ConsoleChannel.Network);
+        // Lobby has started, game is about to begin - session is locked
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RpcLoadScene(string scenePath)
+    {
+        ConsoleSystem.Log($"[NetworkService] Received RPC to load scene: {scenePath}", ConsoleChannel.Network);
+        
+        // Dispatch scene load request on this client
+        GameEvent.DispatchGlobal(new SceneLoadRequestedEvent(scenePath));
+    }
+
     private void SpawnAllPlayers()
     {
         if (!IsServer) return;
@@ -125,12 +161,6 @@ public partial class NetworkService : BaseService,
                 SpawnPlayerForClient(clientId);
             }
         }
-    }
-
-    public void OnGameEvent(LobbyStartedEvent eventArgs)
-    {
-        // When lobby starts, lock it so no new players can join during game
-        ConsoleSystem.Log("[NetworkService] Lobby started, locking multiplayer session", ConsoleChannel.Network);
     }
 
     #region Server Methods

@@ -86,17 +86,34 @@ public partial class PartyBar : Control,
                     if (party != null)
                     {
                         // If we're already in a party, show Steam friend overlay to invite
-                        Steam.ActivateGameOverlayInviteDialog(0); // 0 = invite to current lobby
-                        Waterjam.Core.Systems.Console.ConsoleSystem.Log("[PartyBar] Opened Steam friend invite overlay", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                        var lobbyId = partyService.GetCurrentSteamLobbyId();
+                        if (lobbyId != 0)
+                        {
+                            Steam.ActivateGameOverlayInviteDialog(lobbyId);
+                            Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] Opened Steam friend invite overlay for lobby {lobbyId}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                        }
+                        else
+                        {
+                            Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[PartyBar] No Steam lobby available yet, waiting for lobby creation", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                        }
                     }
                     else
                     {
-                        // Auto-create a party first, then show friend overlay
+                        // Auto-create a party first, then show friend overlay after a delay for lobby creation
                         GameEvent.DispatchGlobal(new CreatePartyRequestEvent("My Party", 8));
-                        // The Steam overlay will be opened when the party is created
-                        GetTree().CreateTimer(0.5f).Timeout += () =>
+                        // Wait for party and lobby creation, then open invite dialog
+                        GetTree().CreateTimer(1.0f).Timeout += () =>
                         {
-                            Steam.ActivateGameOverlayInviteDialog(0);
+                            var lobbyId = partyService.GetCurrentSteamLobbyId();
+                            if (lobbyId != 0)
+                            {
+                                Steam.ActivateGameOverlayInviteDialog(lobbyId);
+                                Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] Opened Steam friend invite overlay for lobby {lobbyId} after auto-create", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                            }
+                            else
+                            {
+                                Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[PartyBar] Steam lobby still not ready after delay", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                            }
                         };
                     }
                 }
