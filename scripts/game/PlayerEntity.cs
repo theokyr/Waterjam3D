@@ -38,8 +38,26 @@ public partial class PlayerEntity : CharacterEntity
         }
 
         // Check if this is a networked player
-        _networkAuthority = GetMultiplayerAuthority();
-        _isNetworked = _networkAuthority != GetTree().GetMultiplayer().GetUniqueId();
+        try
+        {
+            _networkAuthority = GetMultiplayerAuthority();
+            var multiplayer = GetTree()?.GetMultiplayer();
+            if (multiplayer != null && multiplayer.MultiplayerPeer != null)
+            {
+                _isNetworked = _networkAuthority != multiplayer.GetUniqueId();
+            }
+            else
+            {
+                // No multiplayer peer set up, this is a local player
+                _isNetworked = false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.Log($"[PlayerEntity] No multiplayer peer active, treating as local player: {ex.Message}", ConsoleChannel.Debug);
+            _isNetworked = false;
+            _networkAuthority = 1;
+        }
 
         // Only capture mouse for local player
         if (!_isNetworked)

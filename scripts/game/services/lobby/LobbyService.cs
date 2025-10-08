@@ -449,10 +449,15 @@ public partial class LobbyService : BaseService,
 			}
 
             ConsoleSystem.Log($"Starting game for lobby '{lobby.DisplayName}'", ConsoleChannel.Game);
+            
+            // Update lobby status
+            lobby.Status = LobbyStatus.InGame;
+            
             GameEvent.DispatchGlobal(new LobbyStartedEvent(lobby.LobbyId));
 
 			// Trigger actual game start and scene transition using the lobby's selected map
 			var levelPath = lobby.Settings?.MapPath ?? "res://scenes/dev/dev.tscn";
+			ConsoleSystem.Log($"[LobbyService] Transitioning all players to scene: {levelPath}", ConsoleChannel.Game);
 			GameEvent.DispatchGlobal(new NewGameStartedEvent(levelPath));
         }
         catch (Exception ex)

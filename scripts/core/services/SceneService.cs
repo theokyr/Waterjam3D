@@ -98,10 +98,15 @@ public partial class SceneService : BaseService,
             var parentNode = additive && _loadedScenes.ContainsKey(scenePath) ? _loadedScenes[scenePath] : _currentScene;
 
             // Update loading screen and spawn player only for gameplay scenes (not main menu, root, or UI screens)
+            // In multiplayer mode, NetworkService will handle spawning
+            var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
+            var isMultiplayer = networkService != null && networkService.Mode != NetworkMode.None;
+            
             var isUiScene = scenePath.StartsWith("res://scenes/ui/", StringComparison.OrdinalIgnoreCase);
             if (!isUiScene
                 && !string.Equals(scenePath, UiService.MainMenuScenePath, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(scenePath, UiService.RootScenePath, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(scenePath, UiService.RootScenePath, StringComparison.OrdinalIgnoreCase)
+                && !isMultiplayer) // Skip single-player spawn in multiplayer mode
             {
                 if (parentNode != null && IsInstanceValid(parentNode) && parentNode.IsInsideTree())
                 {
@@ -112,6 +117,10 @@ public partial class SceneService : BaseService,
                 {
                     ConsoleSystem.LogWarn("[SceneService] Skipping player spawn: parent scene node invalid or not in tree", ConsoleChannel.Game);
                 }
+            }
+            else if (isMultiplayer)
+            {
+                ConsoleSystem.Log("[SceneService] In multiplayer mode, NetworkService will handle player spawning", ConsoleChannel.Game);
             }
 
             // Hide loading screen after a delay

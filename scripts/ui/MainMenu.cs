@@ -2,6 +2,7 @@ using Waterjam.Events;
 using Waterjam.Core;
 using Godot;
 using Waterjam.Core.Services;
+using Waterjam.Core.Services.Network;
 using Waterjam.Core.Systems.Console;
 using Waterjam.Game.Services;
 using Waterjam.Game.Services.Party;
@@ -29,7 +30,7 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
     {
         _gameService = GetNode<GameService>("/root/GameService");
         InitializeMainMenu();
-        MountPartyBar();
+        // PartyBar is now embedded in the scene, no need to mount programmatically
         _isInitialized = true;
     }
 
@@ -48,26 +49,6 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
         SetupButton("OptionsButton", OnOptionsButtonPressed);
         SetupButton("QuitButton", OnQuitButtonPressed);
         _menuButtons.GetNode<Button>("NewGameButton")?.GrabFocus();
-    }
-
-    private void MountPartyBar()
-    {
-        if (_topRight == null) return;
-        // Avoid duplicates if re-entering
-        if (_topRight.GetNodeOrNull("PartyBar") != null) return;
-
-        // Prefer authored scene for layout & theme consistency
-        var scene = GD.Load<PackedScene>(PartyBarScenePath);
-        if (scene != null)
-        {
-            var partyBar = scene.Instantiate<Waterjam.UI.Components.PartyBar>();
-            _topRight.AddChild(partyBar);
-        }
-        else
-        {
-            var fallback = new Waterjam.UI.Components.PartyBar();
-            _topRight.AddChild(fallback);
-        }
     }
 
     private void SetupButton(string name, System.Action callback)
@@ -168,7 +149,8 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
 		// Resolve services
 		var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
 		var lobbyService = GetNodeOrNull<LobbyService>("/root/LobbyService");
-		if (partyService == null || lobbyService == null)
+		var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
+		if (partyService == null || lobbyService == null || networkService == null)
 		{
 			ShowErrorDialog("Multiplayer Unavailable", "Required services are missing. Please try again.");
 			return;
@@ -189,6 +171,48 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
 		var displayName = !string.IsNullOrWhiteSpace(personaName) ? $"{personaName}'s Lobby" : "My Lobby";
 		var settings = new LobbySettings();
 
+		// Switch NetworkService to Steam backend and start server (creates Steam lobby)
+		ConsoleSystem.Log("[MainMenu] Starting multiplayer: creating Steam lobby...", ConsoleChannel.UI);
+		try
+		{
+			// Disconnect any existing local server connection first
+			if (networkService.Mode != NetworkMode.None)
+			{
+				ConsoleSystem.Log("[MainMenu] Disconnecting existing network session", ConsoleChannel.Network);
+				networkService.Disconnect();
+			}
+
+			// Switch to Steam networking backend
+			var reflectedConfig = networkService.GetType().GetField("_config", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+			if (reflectedConfig != null)
+			{
+				var config = reflectedConfig.GetValue(networkService) as NetworkConfig;
+				if (config != null && config.Backend != NetworkBackend.Steam)
+				{
+					config.Backend = NetworkBackend.Steam;
+					// Trigger adapter re-initialization
+					var initMethod = networkService.GetType().GetMethod("InitializeAdapter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+					initMethod?.Invoke(networkService, null);
+					ConsoleSystem.Log("[MainMenu] Switched to Steam networking backend", ConsoleChannel.Network);
+				}
+			}
+
+			// Start the Steam lobby server
+			var started = networkService.StartServer(0);
+			if (!started)
+			{
+				ShowErrorDialog("Multiplayer Failed", "Failed to create Steam lobby. Please try again.");
+				return;
+			}
+		}
+		catch (System.Exception ex)
+		{
+			ConsoleSystem.LogErr($"[MainMenu] Failed to start Steam lobby: {ex.Message}", ConsoleChannel.Network);
+			ShowErrorDialog("Multiplayer Failed", $"Failed to create Steam lobby: {ex.Message}");
+			return;
+		}
+
+		// Create the game lobby (this manages players and settings)
 		GameEvent.DispatchGlobal(new CreateLobbyRequestEvent(displayName, settings));
 
 		// Navigate to Lobby UI

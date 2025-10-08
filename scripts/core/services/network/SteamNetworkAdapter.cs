@@ -22,8 +22,20 @@ public class SteamNetworkAdapter : INetworkAdapter
     private string _lobbyJoinCode;
     private bool _isHost;
     private bool _isConnected;
+    private bool _lobbyCreationPending;
 
     public MultiplayerPeer Peer => _peer;
+
+    public SteamNetworkAdapter()
+    {
+        // Wire up Steam lobby callbacks
+        if (PlatformService.IsSteamInitialized)
+        {
+            Steam.LobbyCreated += OnLobbyCreated;
+            Steam.LobbyMatchList += OnLobbyMatchList;
+            // Note: LobbyJoinRequested is not available in current GodotSteam C# bindings
+        }
+    }
 
     public bool StartServer(int port, int maxPlayers)
     {
@@ -35,10 +47,11 @@ public class SteamNetworkAdapter : INetworkAdapter
 
         try
         {
-            // Create a Steam lobby
+            // Create a Steam lobby - this is async, we'll handle the response in OnLobbyCreated
             Steam.CreateLobby(Steam.LobbyType.FriendsOnly, maxPlayers);
 
             _isHost = true;
+            _lobbyCreationPending = true;
             ConsoleSystem.Log($"[SteamNetworkAdapter] Creating Steam lobby (max {maxPlayers} players)", ConsoleChannel.Network);
 
             return true;
@@ -47,6 +60,43 @@ public class SteamNetworkAdapter : INetworkAdapter
         {
             ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to create lobby: {ex.Message}", ConsoleChannel.Network);
             return false;
+        }
+    }
+
+    private void OnLobbyCreated(long result, ulong lobbyId)
+    {
+        _lobbyCreationPending = false;
+        
+        if (result != 1) // 1 = k_EResultOK
+        {
+            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to create lobby: result {result}", ConsoleChannel.Network);
+            _isHost = false;
+            return;
+        }
+
+        _lobbyId = lobbyId;
+        _lobbyJoinCode = GenerateLobbyCode();
+        _isConnected = true;
+
+        // Set lobby data
+        Steam.SetLobbyData(lobbyId, "join_code", _lobbyJoinCode);
+        Steam.SetLobbyData(lobbyId, "name", "Game Lobby");
+
+        ConsoleSystem.Log($"[SteamNetworkAdapter] Steam lobby created! ID: {lobbyId}, Join Code: {_lobbyJoinCode}", ConsoleChannel.Network);
+
+        // Now create the actual networking peer (using ENet for reliable networking)
+        CreateLobbyPeer();
+    }
+
+    private void OnLobbyMatchList(Godot.Collections.Array lobbies)
+    {
+        ConsoleSystem.Log($"[SteamNetworkAdapter] Found {lobbies.Count} lobbies", ConsoleChannel.Network);
+        
+        if (lobbies.Count > 0)
+        {
+            // Join the first matching lobby
+            var lobbyId = lobbies[0].AsUInt64();
+            Steam.JoinLobby(lobbyId);
         }
     }
 
@@ -120,21 +170,30 @@ public class SteamNetworkAdapter : INetworkAdapter
     {
         try
         {
+            // Unhook Steam callbacks
+            if (PlatformService.IsSteamInitialized)
+            {
+                Steam.LobbyCreated -= OnLobbyCreated;
+                Steam.LobbyMatchList -= OnLobbyMatchList;
+            }
+
             if (_lobbyId != 0)
             {
                 Steam.LeaveLobby(_lobbyId);
                 _lobbyId = 0;
             }
 
-            if (_isHost)
+            if (_peer != null)
             {
-                // Clean up host-specific resources
+                _peer.Close();
+                _peer = null;
             }
 
             _isConnected = false;
             _isHost = false;
             _hostSteamId = 0;
             _lobbyJoinCode = null;
+            _lobbyCreationPending = false;
 
             ConsoleSystem.Log("[SteamNetworkAdapter] Disconnected", ConsoleChannel.Network);
         }
@@ -195,22 +254,29 @@ public class SteamNetworkAdapter : INetworkAdapter
     {
         try
         {
-            // For Steam lobbies, we'll use a custom implementation since SteamMultiplayerPeer doesn't exist
-            // Create a basic ENet peer for now, but integrate with Steam networking
+            // Hybrid approach: Use Steam for matchmaking/lobby, ENet for actual game networking
+            // This gives us reliable networking with Steam friend integration
             _peer = new ENetMultiplayerPeer();
 
             // Initialize as a host if we're the lobby owner
             if (_isHost)
             {
+                // Use a consistent port for hosting (clients will connect to host's public IP via Steam)
                 var error = ((ENetMultiplayerPeer)_peer).CreateServer(7777, 32);
                 if (error != Error.Ok)
                 {
                     ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to create server peer: {error}", ConsoleChannel.Network);
                     return;
                 }
-            }
 
-            ConsoleSystem.Log("[SteamNetworkAdapter] Created multiplayer peer", ConsoleChannel.Network);
+                ConsoleSystem.Log("[SteamNetworkAdapter] Created ENet server peer on port 7777", ConsoleChannel.Network);
+            }
+            else
+            {
+                // Client will connect via ENet to the host
+                // The host's IP will be shared via Steam lobby data
+                ConsoleSystem.Log("[SteamNetworkAdapter] Prepared client peer", ConsoleChannel.Network);
+            }
         }
         catch (Exception ex)
         {

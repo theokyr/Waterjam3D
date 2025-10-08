@@ -37,6 +37,7 @@ public partial class ConsoleSystem : Node,
         instance = this;
         _mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
         RegisterBaseCommands();
+        ConsoleInputCommands.RegisterAll(this);
         InitializeLogging();
         TryParseCommandLine();
         InitializeMcpInbox();

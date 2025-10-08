@@ -20,13 +20,13 @@ public partial class PartyBar : Control,
 
 	public override void _Ready()
 	{
-		// Prefer scene-authored layout if present; fall back to programmatic layout.
 		Name = "PartyBar";
 		ZIndex = 100;
-		MouseFilter = MouseFilterEnum.Stop;
 
 		_avatarRow = GetNodeOrNull<HBoxContainer>("Root/Avatars");
 		_inviteButton = GetNodeOrNull<Button>("Root/InviteButton");
+
+		Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] _Ready: avatarRow={_avatarRow != null}, inviteButton={_inviteButton != null}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
 
 		if (_avatarRow == null || _inviteButton == null)
 		{
@@ -64,6 +64,7 @@ public partial class PartyBar : Control,
 		if (_inviteButton != null)
 		{
 			_inviteButton.Pressed += OnInvitePressed;
+			Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] Invite button connected. Position=[X={_inviteButton.Position.X}, Y={_inviteButton.Position.Y}], Disabled={_inviteButton.Disabled}, Visible={_inviteButton.Visible}, MouseFilter={_inviteButton.MouseFilter}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
 		}
 
 		Refresh();
@@ -71,8 +72,45 @@ public partial class PartyBar : Control,
 
     private void OnInvitePressed()
     {
-        // Navigate to Party screen where full invite UI is available
-        GameEvent.DispatchGlobal(new UiShowPartyScreenEvent());
+        Waterjam.Core.Systems.Console.ConsoleSystem.Log("[PartyBar] Invite button PRESSED!", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+        
+        // Open Steam overlay to invite friends if Steam is available
+        if (PlatformService.IsSteamInitialized)
+        {
+            try
+            {
+                var partyService = GetNodeOrNull("/root/PartyService") as Waterjam.Game.Services.Party.PartyService;
+                if (partyService != null)
+                {
+                    var party = partyService.GetCurrentPlayerParty();
+                    if (party != null)
+                    {
+                        // If we're already in a party, show Steam friend overlay to invite
+                        Steam.ActivateGameOverlayInviteDialog(0); // 0 = invite to current lobby
+                        Waterjam.Core.Systems.Console.ConsoleSystem.Log("[PartyBar] Opened Steam friend invite overlay", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                    }
+                    else
+                    {
+                        // Auto-create a party first, then show friend overlay
+                        GameEvent.DispatchGlobal(new CreatePartyRequestEvent("My Party", 8));
+                        // The Steam overlay will be opened when the party is created
+                        GetTree().CreateTimer(0.5f).Timeout += () =>
+                        {
+                            Steam.ActivateGameOverlayInviteDialog(0);
+                        };
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Waterjam.Core.Systems.Console.ConsoleSystem.LogErr($"[PartyBar] Failed to open Steam invite: {ex.Message}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+            }
+        }
+        else
+        {
+            // Fallback: Navigate to Party screen where manual invite UI is available
+            GameEvent.DispatchGlobal(new UiShowPartyScreenEvent());
+        }
     }
 
 	private void Refresh()
@@ -207,8 +245,8 @@ public partial class PartyBar : Control,
         return "You";
     }
 
-    public void OnGameEvent(PartyCreatedEvent e) { CallDeferred(nameof(Refresh)); Waterjam.Events.GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent()); }
-    public void OnGameEvent(PartyJoinedEvent e) { CallDeferred(nameof(Refresh)); Waterjam.Events.GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent()); }
+    public void OnGameEvent(PartyCreatedEvent e) { CallDeferred(nameof(Refresh)); }
+    public void OnGameEvent(PartyJoinedEvent e) { CallDeferred(nameof(Refresh)); }
 	public void OnGameEvent(PartyLeftEvent e) => CallDeferred(nameof(Refresh));
 	public void OnGameEvent(PartyMemberJoinedEvent e) => CallDeferred(nameof(Refresh));
 	public void OnGameEvent(PartyMemberLeftEvent e) => CallDeferred(nameof(Refresh));

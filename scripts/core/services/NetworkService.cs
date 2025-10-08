@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using GodotSteam;
@@ -16,7 +17,9 @@ namespace Waterjam.Core.Services;
 /// Handles connections, message routing, and network state management.
 /// </summary>
 public partial class NetworkService : BaseService,
-    IGameEventHandler<GameInitializedEvent>
+    IGameEventHandler<GameInitializedEvent>,
+    IGameEventHandler<SceneLoadEvent>,
+    IGameEventHandler<LobbyStartedEvent>
 {
     // Configuration
     private NetworkConfig _config;
@@ -91,6 +94,43 @@ public partial class NetworkService : BaseService,
         {
             StartLocalServer();
         }
+    }
+
+    public void OnGameEvent(SceneLoadEvent eventArgs)
+    {
+        // When a new gameplay scene is loaded in multiplayer, spawn players for all connected peers
+        if (IsServer && !string.Equals(eventArgs.ScenePath, "res://scenes/ui/MainMenu.tscn", System.StringComparison.OrdinalIgnoreCase))
+        {
+            ConsoleSystem.Log($"[NetworkService] Scene loaded in multiplayer: {eventArgs.ScenePath}, spawning all players", ConsoleChannel.Network);
+            
+            // Give the scene a moment to initialize - use CallDeferred to ensure we're in the proper context
+            CallDeferred(MethodName.SpawnAllPlayers);
+        }
+    }
+
+    private void SpawnAllPlayers()
+    {
+        if (!IsServer) return;
+
+        ConsoleSystem.Log("[NetworkService] Spawning all players after scene load", ConsoleChannel.Network);
+
+        // Spawn local player (peer ID 1 for server)
+        SpawnPlayerForClient(1);
+        
+        // Spawn all connected remote clients
+        foreach (var clientId in _connectedClients.Keys.ToArray())
+        {
+            if (clientId != 1) // Skip server/local player
+            {
+                SpawnPlayerForClient(clientId);
+            }
+        }
+    }
+
+    public void OnGameEvent(LobbyStartedEvent eventArgs)
+    {
+        // When lobby starts, lock it so no new players can join during game
+        ConsoleSystem.Log("[NetworkService] Lobby started, locking multiplayer session", ConsoleChannel.Network);
     }
 
     #region Server Methods
@@ -245,6 +285,21 @@ public partial class NetworkService : BaseService,
 
         try
         {
+            // Verify we have a valid scene tree
+            var tree = GetTree();
+            if (tree == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] GetTree() returned null, cannot spawn player", ConsoleChannel.Network);
+                return;
+            }
+
+            var currentScene = tree.CurrentScene;
+            if (currentScene == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] CurrentScene is null, cannot spawn player", ConsoleChannel.Network);
+                return;
+            }
+
             // Find a spawn point (for now, just use origin with some offset)
             var spawnPosition = new Vector3(peerId * 2, 2, 0); // Offset each player slightly
 
@@ -266,12 +321,23 @@ public partial class NetworkService : BaseService,
 
             // Set player properties
             playerInstance.Name = $"Player_{peerId}";
-            playerInstance.GlobalPosition = spawnPosition;
-            playerInstance.SetNetworkAuthority(peerId); // Give authority to the client
+            
+            // Set network authority BEFORE adding to tree
+            try
+            {
+                playerInstance.SetMultiplayerAuthority((int)peerId);
+                ConsoleSystem.Log($"[NetworkService] Set multiplayer authority for peer {peerId}", ConsoleChannel.Network);
+            }
+            catch (Exception authEx)
+            {
+                ConsoleSystem.LogErr($"[NetworkService] Failed to set multiplayer authority: {authEx.Message}", ConsoleChannel.Network);
+            }
 
             // Add to the scene tree
-            var world = GetTree().CurrentScene;
-            world.AddChild(playerInstance);
+            currentScene.AddChild(playerInstance);
+
+            // Set position after adding to tree
+            playerInstance.GlobalPosition = spawnPosition;
 
             // Track the player
             _networkedPlayers[peerId] = playerInstance;
@@ -441,20 +507,35 @@ public partial class NetworkService : BaseService,
     /// </summary>
     public void Disconnect()
     {
+        // Skip if we're not in a network mode
+        if (Mode == NetworkMode.None)
+        {
+            ConsoleSystem.Log("[NetworkService] Already disconnected, nothing to do", ConsoleChannel.Network);
+            return;
+        }
+
         var multiplayer = GetTree().GetMultiplayer();
         if (multiplayer != null && multiplayer.MultiplayerPeer != null)
         {
-            // Disconnect signals
-            if (IsServer)
+            // Disconnect signals - use try-catch to handle cases where they weren't connected
+            try
             {
-                multiplayer.PeerConnected -= OnPeerConnected;
-                multiplayer.PeerDisconnected -= OnPeerDisconnected;
+                if (IsServer)
+                {
+                    multiplayer.PeerConnected -= OnPeerConnected;
+                    multiplayer.PeerDisconnected -= OnPeerDisconnected;
+                }
+                else
+                {
+                    multiplayer.ConnectedToServer -= OnConnectedToServer;
+                    multiplayer.ConnectionFailed -= OnConnectionFailed;
+                    multiplayer.ServerDisconnected -= OnServerDisconnected;
+                }
             }
-            else
+            catch (System.Exception ex)
             {
-                multiplayer.ConnectedToServer -= OnConnectedToServer;
-                multiplayer.ConnectionFailed -= OnConnectionFailed;
-                multiplayer.ServerDisconnected -= OnServerDisconnected;
+                // Signals weren't connected, which is fine
+                ConsoleSystem.Log($"[NetworkService] Note: Some signals weren't connected during disconnect: {ex.Message}", ConsoleChannel.Network);
             }
 
             multiplayer.MultiplayerPeer = null;
@@ -480,7 +561,7 @@ public partial class NetworkService : BaseService,
             MaxPlayers = 32,
             TickRate = 30,
             SnapshotRate = 20,
-            AutoStartLocalServer = true,
+            AutoStartLocalServer = false, // Don't auto-start; let explicit SP/MP flow handle it
             EnableCompression = true,
             InterpolationDelay = 100, // ms
             Backend = NetworkBackend.ENet

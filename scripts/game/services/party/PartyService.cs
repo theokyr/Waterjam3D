@@ -243,11 +243,7 @@ public partial class PartyService : BaseService,
 
             ConsoleSystem.Log($"Created party '{party.DisplayName}' with code '{partyCode}'", ConsoleChannel.Game);
 
-            // Create Steam lobby if Steam is available
-            if (PlatformService.IsSteamInitialized)
-            {
-                CreateSteamLobby(party, eventArgs.MaxMembers);
-            }
+            // Note: Parties are social groups only. Steam lobbies are created when starting a game session.
 
             GameEvent.DispatchGlobal(new PartyCreatedEvent(partyId, partyCode, _localPlayerId, party.DisplayName));
         }
@@ -442,10 +438,7 @@ public partial class PartyService : BaseService,
 
                 ConsoleSystem.Log($"[PartyService] Auto-created party '{displayName}' to send invite.", ConsoleChannel.Game);
 
-                if (PlatformService.IsSteamInitialized)
-                {
-                    CreateSteamLobby(party, maxMembers: 8);
-                }
+                // Note: Parties are social groups only. Steam lobbies are created when starting a game session.
 
                 GameEvent.DispatchGlobal(new PartyCreatedEvent(partyId, partyCode, _localPlayerId, displayName));
             }
