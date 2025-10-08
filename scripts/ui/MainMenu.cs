@@ -7,6 +7,8 @@ using Waterjam.Game.Services;
 using Waterjam.Game.Services.Party;
 using Waterjam.Game.Services.Lobby;
 using System.Linq;
+using Waterjam.Domain.Lobby;
+using GodotSteam;
 
 namespace Waterjam.UI;
 
@@ -20,6 +22,7 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
 
     private const string SettingsScenePath = "res://scenes/ui/Settings.tscn";
     private const string LobbyScenePath = "res://scenes/ui/LobbyUI.tscn";
+    private const string PartyBarScenePath = "res://scenes/ui/PartyBar.tscn";
     private const string PartyScenePath = "res://scenes/ui/PartyUI.tscn";
 
     public override void _Ready()
@@ -53,8 +56,18 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
         // Avoid duplicates if re-entering
         if (_topRight.GetNodeOrNull("PartyBar") != null) return;
 
-        var partyBar = new Waterjam.UI.Components.PartyBar();
-        _topRight.AddChild(partyBar);
+        // Prefer authored scene for layout & theme consistency
+        var scene = GD.Load<PackedScene>(PartyBarScenePath);
+        if (scene != null)
+        {
+            var partyBar = scene.Instantiate<Waterjam.UI.Components.PartyBar>();
+            _topRight.AddChild(partyBar);
+        }
+        else
+        {
+            var fallback = new Waterjam.UI.Components.PartyBar();
+            _topRight.AddChild(fallback);
+        }
     }
 
     private void SetupButton(string name, System.Action callback)
@@ -77,16 +90,16 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
     private void OnStartButtonPressed()
     {
         OnButtonPressed();
-        // Load dev scene per request
-        GameEvent.DispatchGlobal(new SceneLoadRequestedEvent("res://scenes/dev/dev.tscn"));
-        // Hide self to reveal scene immediately
+        // Start new game via event so GameService owns the flow
+        GameEvent.DispatchGlobal(new NewGameStartedEvent("res://scenes/dev/dev.tscn"));
+        // Hide self; UiService will manage further UI
         CallDeferred(Node.MethodName.QueueFree);
     }
 
     private void OnMultiplayerButtonPressed()
     {
         OnButtonPressed();
-        ShowLobbyUI();
+		StartMultiplayerFlow();
     }
 
     private void OnOptionsButtonPressed()
@@ -141,6 +154,56 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
         AddChild(lobbyUI);
         _menuButtons.Visible = false;
     }
+
+	private void StartMultiplayerFlow()
+	{
+		// Ensure Platform/Steam readiness
+		var platformService = GetNodeOrNull<PlatformService>("/root/PlatformService");
+		if (platformService == null || !PlatformService.IsSteamInitialized)
+		{
+			ShowErrorDialog("Multiplayer Unavailable", "Steam is not initialized. Please start Steam and restart the game.");
+			return;
+		}
+
+		// Resolve services
+		var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
+		var lobbyService = GetNodeOrNull<LobbyService>("/root/LobbyService");
+		if (partyService == null || lobbyService == null)
+		{
+			ShowErrorDialog("Multiplayer Unavailable", "Required services are missing. Please try again.");
+			return;
+		}
+
+		// Ensure LobbyService has a local player ID (align with PartyService)
+		var localPlayerId = partyService.GetLocalPlayerId();
+		if (string.IsNullOrEmpty(localPlayerId))
+		{
+			ShowErrorDialog("Multiplayer Unavailable", "Player identity not ready yet. Please wait a moment and try again.");
+			return;
+		}
+		lobbyService.SetLocalPlayerId(localPlayerId);
+
+		// Create default lobby with sensible name and settings
+		string personaName = null;
+		try { personaName = Steam.GetPersonaName(); } catch { }
+		var displayName = !string.IsNullOrWhiteSpace(personaName) ? $"{personaName}'s Lobby" : "My Lobby";
+		var settings = new LobbySettings();
+
+		GameEvent.DispatchGlobal(new CreateLobbyRequestEvent(displayName, settings));
+
+		// Navigate to Lobby UI
+		ShowLobbyUI();
+	}
+
+	private void ShowErrorDialog(string title, string message)
+	{
+		var dialog = new AcceptDialog();
+		dialog.Title = title;
+		dialog.DialogText = message;
+		dialog.AddCancelButton("Close");
+		AddChild(dialog);
+		dialog.PopupCentered();
+	}
 
     private void OnMultiplayerUIBackPressed()
     {

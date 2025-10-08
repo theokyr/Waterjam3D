@@ -20,39 +20,51 @@ public partial class PartyBar : Control,
 
 	public override void _Ready()
 	{
-		// Layout: [avatars ...] [+]
+		// Prefer scene-authored layout if present; fall back to programmatic layout.
 		Name = "PartyBar";
 		ZIndex = 100;
-		AnchorRight = 1.0f;
-		AnchorTop = 0f;
-		AnchorBottom = 0f;
-		OffsetRight = 0f;
-		OffsetTop = 8f;
-		OffsetBottom = 56f;
-		GrowHorizontal = GrowDirection.Both;
 		MouseFilter = MouseFilterEnum.Stop;
 
-		var root = new HBoxContainer();
-		root.Name = "Root";
-		root.Alignment = BoxContainer.AlignmentMode.End;
-		root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		root.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-		AddChild(root);
+		_avatarRow = GetNodeOrNull<HBoxContainer>("Root/Avatars");
+		_inviteButton = GetNodeOrNull<Button>("Root/InviteButton");
 
-		_avatarRow = new HBoxContainer();
-		_avatarRow.Name = "Avatars";
-		_avatarRow.Alignment = BoxContainer.AlignmentMode.End;
-		_avatarRow.AddThemeConstantOverride("separation", 6);
-		root.AddChild(_avatarRow);
+		if (_avatarRow == null || _inviteButton == null)
+		{
+			// Fallback: build minimal layout programmatically to remain functional without a .tscn
+			AnchorRight = 1.0f;
+			AnchorTop = 0f;
+			AnchorBottom = 0f;
+			OffsetRight = 0f;
+			OffsetTop = 8f;
+			OffsetBottom = 56f;
+			GrowHorizontal = GrowDirection.Both;
 
-		_inviteButton = new Button();
-		_inviteButton.Name = "InviteButton";
-		_inviteButton.Text = "+";
-		_inviteButton.TooltipText = "Invite to Party";
-		_inviteButton.FocusMode = FocusModeEnum.None;
-		_inviteButton.CustomMinimumSize = new Vector2(32, 32);
-		_inviteButton.Pressed += OnInvitePressed;
-		root.AddChild(_inviteButton);
+			var root = new HBoxContainer();
+			root.Name = "Root";
+			root.Alignment = BoxContainer.AlignmentMode.End;
+			root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+			root.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+			AddChild(root);
+
+			_avatarRow = new HBoxContainer();
+			_avatarRow.Name = "Avatars";
+			_avatarRow.Alignment = BoxContainer.AlignmentMode.End;
+			_avatarRow.AddThemeConstantOverride("separation", 6);
+			root.AddChild(_avatarRow);
+
+			_inviteButton = new Button();
+			_inviteButton.Name = "InviteButton";
+			_inviteButton.Text = "+";
+			_inviteButton.TooltipText = "Invite to Party";
+			_inviteButton.FocusMode = FocusModeEnum.None;
+			_inviteButton.CustomMinimumSize = new Vector2(32, 32);
+			root.AddChild(_inviteButton);
+		}
+
+		if (_inviteButton != null)
+		{
+			_inviteButton.Pressed += OnInvitePressed;
+		}
 
 		Refresh();
 	}

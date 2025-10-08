@@ -37,6 +37,7 @@ public partial class LobbyUI : Control,
     private Label _difficultyLabel;
 
     private string _localPlayerId;
+    private bool _startRequested;
 
     public override void _Ready()
     {
@@ -55,6 +56,9 @@ public partial class LobbyUI : Control,
         _mapLabel = GetNode<Label>("Panel/VBoxContainer/HBoxContainer/RightPanel/Settings/MapLabel");
         _gameModeLabel = GetNode<Label>("Panel/VBoxContainer/HBoxContainer/RightPanel/Settings/GameModeLabel");
         _difficultyLabel = GetNode<Label>("Panel/VBoxContainer/HBoxContainer/RightPanel/Settings/DifficultyLabel");
+        
+        // Ensure button signals are wired (in case the scene lacks editor connections)
+        if (_startGameButton != null) _startGameButton.Pressed += _on_start_game_pressed;
 
         // Get local player ID from party service (assuming it's set)
         var partyService = GetNode("/root/PartyService") as Waterjam.Game.Services.Party.PartyService;
@@ -153,7 +157,7 @@ public partial class LobbyUI : Control,
 
     private void _on_change_leader_pressed()
     {
-        var lobbyService = GetNode("/root/GameSystems/LobbyService") as Waterjam.Game.Services.Lobby.LobbyService;
+        var lobbyService = GetNode("/root/LobbyService") as Waterjam.Game.Services.Lobby.LobbyService;
         if (lobbyService == null)
         {
             GD.PushWarning("LobbyService not found");
@@ -199,6 +203,13 @@ public partial class LobbyUI : Control,
 
     private void _on_start_game_pressed()
     {
+        if (_startRequested)
+            return;
+
+        _startRequested = true;
+        if (_startGameButton != null)
+            _startGameButton.Disabled = true;
+
         GameEvent.DispatchGlobal(new StartGameRequestEvent());
     }
 
@@ -246,7 +257,8 @@ public partial class LobbyUI : Control,
 
     public void OnGameEvent(LobbyStartedEvent eventArgs)
     {
-        CallDeferred(nameof(UpdateLobbyDisplay));
+        // Close lobby UI when the game starts
+        CallDeferred(Node.MethodName.QueueFree);
     }
 
     public void OnGameEvent(LobbyEndedEvent eventArgs)

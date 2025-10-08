@@ -11,8 +11,7 @@ namespace Waterjam.Game.Services;
 
 public partial class SceneService : BaseService,
     IGameEventHandler<SceneLoadRequestedEvent>,
-    IGameEventHandler<SceneDestroyRequestedEvent>,
-    IGameEventHandler<NewGameStartedEvent>
+    IGameEventHandler<SceneDestroyRequestedEvent>
 {
     private readonly HashSet<string> PROTECTED_ROOTS = new()
     {
@@ -23,7 +22,6 @@ public partial class SceneService : BaseService,
 
     private Node _currentScene;
     private Dictionary<string, Node> _loadedScenes = new();
-    private bool _deferPlayerSpawnUntilCityReady;
 
     public override void _Ready()
     {
@@ -107,15 +105,8 @@ public partial class SceneService : BaseService,
             {
                 if (parentNode != null && IsInstanceValid(parentNode) && parentNode.IsInsideTree())
                 {
-                    if (_deferPlayerSpawnUntilCityReady)
-                    {
-                        ConsoleSystem.Log("[SceneService] Deferring player spawn until CityGenerationCompleteEvent", ConsoleChannel.Game);
-                    }
-                    else
-                    {
-                        GameEvent.DispatchGlobal(new LoadingScreenUpdateEvent(0.9f, "Spawning player..."));
-                        GameEvent.DispatchGlobal(new PlayerSpawnRequestEvent(parentNode));
-                    }
+                    GameEvent.DispatchGlobal(new LoadingScreenUpdateEvent(0.9f, "Spawning player..."));
+                    GameEvent.DispatchGlobal(new PlayerSpawnRequestEvent(parentNode));
                 }
                 else
                 {
@@ -128,14 +119,24 @@ public partial class SceneService : BaseService,
         };
     }
 
-    public void OnGameEvent(NewGameStartedEvent eventArgs)
-    {
-        // Gate player spawn until city generation signals completion
-        _deferPlayerSpawnUntilCityReady = true;
-    }
-
     private void DeferredSceneSwitch(Node root, Node newScene, string scenePath)
     {
+        // Clean up any previously tracked additive scenes (UI overlays loaded via SceneService)
+        if (_loadedScenes.Count > 0)
+        {
+            foreach (var kv in _loadedScenes.ToList())
+            {
+                var scene = kv.Value;
+                if (IsInstanceValid(scene))
+                {
+                    if (scene.GetParent() == root)
+                        root.RemoveChild(scene);
+                    scene.QueueFree();
+                }
+            }
+            _loadedScenes.Clear();
+        }
+
         if (_currentScene != null && _currentScene.IsInsideTree())
         {
             root.RemoveChild(_currentScene);

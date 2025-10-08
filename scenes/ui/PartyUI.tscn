@@ -40,10 +40,7 @@ vertical_alignment = 1
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Party" type="TabBar" parent="Panel/VBoxContainer/TabContainer"]
-
 [node name="PartyTab" type="Control" parent="Panel/VBoxContainer/TabContainer"]
-visible = false
 layout_mode = 2
 
 [node name="PartyInfo" type="VBoxContainer" parent="Panel/VBoxContainer/TabContainer/PartyTab"]
@@ -86,10 +83,7 @@ layout_mode = 2
 size_flags_vertical = 3
 visible = false
 
-[node name="Invites" type="TabBar" parent="Panel/VBoxContainer/TabContainer"]
-
 [node name="InvitesTab" type="Control" parent="Panel/VBoxContainer/TabContainer"]
-visible = false
 layout_mode = 2
 
 [node name="InvitesList" type="ItemList" parent="Panel/VBoxContainer/TabContainer/InvitesTab"]
@@ -114,6 +108,9 @@ offset_right = 50.0
 offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 0
+
+[editable path="Panel/VBoxContainer/TabContainer/PartyTab"]
+[editable path="Panel/VBoxContainer/TabContainer/InvitesTab"]
 
 [node name="CloseButton" type="Button" parent="Panel/VBoxContainer"]
 layout_mode = 2

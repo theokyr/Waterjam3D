@@ -9,7 +9,8 @@ namespace Waterjam.Game.Services;
 
 public partial class GameService : BaseService,
     IGameEventHandler<NewGameStartedEvent>,
-    IGameEventHandler<QuitRequestedEvent>
+    IGameEventHandler<QuitRequestedEvent>,
+    IGameEventHandler<PlayerSpawnRequestEvent>
 {
     public const string RootScene = "res://scenes/root.tscn";
 
@@ -72,5 +73,46 @@ public partial class GameService : BaseService,
     {
         // Game is fully loaded and player is spawned
         ConsoleSystem.Log("Player spawned successfully - game ready!", ConsoleChannel.Game);
+    }
+
+    public void OnGameEvent(PlayerSpawnRequestEvent eventArgs)
+    {
+        try
+        {
+            if (eventArgs.ParentSceneNode == null || !IsInstanceValid(eventArgs.ParentSceneNode))
+            {
+                ConsoleSystem.LogErr("[GameService] Invalid parent scene node for player spawn", ConsoleChannel.Game);
+                return;
+            }
+
+            var packed = ResourceLoader.Load<PackedScene>("res://scenes/Player.tscn");
+            if (packed == null)
+            {
+                ConsoleSystem.LogErr("[GameService] Failed to load player scene at res://scenes/Player.tscn", ConsoleChannel.Game);
+                return;
+            }
+
+            var playerNode = packed.Instantiate<Node>();
+            if (playerNode == null)
+            {
+                ConsoleSystem.LogErr("[GameService] Failed to instantiate player scene", ConsoleChannel.Game);
+                return;
+            }
+
+            // Add to the requested parent
+            eventArgs.ParentSceneNode.AddChild(playerNode);
+
+            // Apply optional transform if provided
+            if (playerNode is Node3D node3D && eventArgs.Position.HasValue)
+            {
+                node3D.GlobalPosition = eventArgs.Position.Value;
+            }
+
+            GameEvent.DispatchGlobal(new PlayerSpawnedEvent(playerNode, eventArgs.ParentSceneNode));
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[GameService] Exception while spawning player: {ex.Message}", ConsoleChannel.Game);
+        }
     }
 }

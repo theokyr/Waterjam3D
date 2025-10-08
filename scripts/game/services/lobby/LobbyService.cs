@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using Waterjam.Core.Services;
+using GodotSteam;
 using Waterjam.Core.Systems.Console;
 using Waterjam.Domain.Lobby;
 using Waterjam.Domain.Chat;
@@ -36,6 +37,33 @@ public partial class LobbyService : BaseService,
 
         // Register console commands for debugging
         RegisterConsoleCommands();
+
+        // Initialize local player ID from platform (e.g., Steam) for frictionless UI/flows
+        if (string.IsNullOrEmpty(_localPlayerId))
+        {
+            if (PlatformService.IsSteamInitialized)
+            {
+                try
+                {
+                    var sid = Steam.GetSteamID();
+                    if (sid != 0)
+                    {
+                        _localPlayerId = sid.ToString();
+                        ConsoleSystem.Log($"[LobbyService] Local player set from Steam: {_localPlayerId}", ConsoleChannel.Game);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ConsoleSystem.LogWarn($"[LobbyService] Failed to read SteamID: {ex.Message}", ConsoleChannel.Game);
+                }
+            }
+
+            // Fallback ID in non-Steam environments
+            if (string.IsNullOrEmpty(_localPlayerId))
+            {
+                _localPlayerId = "local";
+            }
+        }
     }
 
     /// <summary>
@@ -43,6 +71,10 @@ public partial class LobbyService : BaseService,
     /// </summary>
     public Waterjam.Domain.Lobby.Lobby GetPlayerLobby(string playerId)
     {
+        if (string.IsNullOrEmpty(playerId))
+        {
+            return null;
+        }
         if (_playerLobbyMap.TryGetValue(playerId, out var lobbyId))
         {
             return _lobbies.GetValueOrDefault(lobbyId);
@@ -55,6 +87,10 @@ public partial class LobbyService : BaseService,
     /// </summary>
     public Waterjam.Domain.Lobby.Lobby GetCurrentPlayerLobby()
     {
+        if (string.IsNullOrEmpty(_localPlayerId))
+        {
+            return null;
+        }
         return GetPlayerLobby(_localPlayerId);
     }
 
@@ -71,6 +107,10 @@ public partial class LobbyService : BaseService,
     /// </summary>
     public Waterjam.Domain.Lobby.Lobby GetLobby(string lobbyId)
     {
+        if (string.IsNullOrEmpty(lobbyId))
+        {
+            return null;
+        }
         return _lobbies.GetValueOrDefault(lobbyId);
     }
 
@@ -79,6 +119,10 @@ public partial class LobbyService : BaseService,
     /// </summary>
     public ChatChannel GetLobbyChatChannel(string lobbyId)
     {
+        if (string.IsNullOrEmpty(lobbyId))
+        {
+            return null;
+        }
         return _lobbyChatChannels.GetValueOrDefault(lobbyId);
     }
 
@@ -160,13 +204,44 @@ public partial class LobbyService : BaseService,
             _lobbies[lobbyId] = lobby;
             _playerLobbyMap[_localPlayerId] = lobbyId;
 
-            // Create chat channel for the lobby
+            // If the player has a party, add all current party members to this lobby
+            try
+            {
+                var partyService = GetNodeOrNull<Waterjam.Game.Services.Party.PartyService>("/root/PartyService");
+                var currentParty = partyService?.GetCurrentPlayerParty();
+                if (currentParty != null)
+                {
+                    foreach (var member in currentParty.Members)
+                    {
+                        if (!lobby.ContainsPlayer(member.PlayerId))
+                        {
+                            var lobbyPlayer = new LobbyPlayer(member.PlayerId, isLeader: member.PlayerId == lobby.LeaderPlayerId, displayName: member.DisplayName);
+                            lobby.AddPlayer(lobbyPlayer);
+                            _playerLobbyMap[member.PlayerId] = lobbyId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ConsoleSystem.LogWarn($"[LobbyService] Failed to import party members into lobby: {ex.Message}", ConsoleChannel.Game);
+            }
+
+            // Create chat channel for the lobby and add current participants
             var chatChannel = new ChatChannel(lobbyId, $"Lobby: {lobby.DisplayName}", ChatChannelType.Lobby);
             _lobbyChatChannels[lobbyId] = chatChannel;
+            foreach (var p in lobby.Players)
+            {
+                chatChannel.AddParticipant(p.PlayerId);
+            }
 
             ConsoleSystem.Log($"Created lobby '{lobby.DisplayName}'", ConsoleChannel.Game);
 
             GameEvent.DispatchGlobal(new LobbyCreatedEvent(lobbyId, _localPlayerId, lobby.DisplayName));
+            foreach (var p in lobby.Players)
+            {
+                GameEvent.DispatchGlobal(new LobbyPlayerJoinedEvent(lobbyId, p));
+            }
         }
         catch (Exception ex)
         {
@@ -354,14 +429,31 @@ public partial class LobbyService : BaseService,
                 return;
             }
 
-            if (!lobby.StartGame(_localPlayerId))
-            {
-                ConsoleSystem.LogErr("Cannot start game: only the leader can start the game", ConsoleChannel.Game);
-                return;
-            }
+			// Validate leader and state explicitly for clearer feedback and to avoid duplicate attempts
+			if (lobby.LeaderPlayerId != _localPlayerId)
+			{
+				ConsoleSystem.LogErr("Cannot start game: only the leader can start the game", ConsoleChannel.Game);
+				return;
+			}
+
+			if (lobby.Status != LobbyStatus.Waiting)
+			{
+				ConsoleSystem.LogWarn($"Cannot start game: lobby status is {lobby.Status}", ConsoleChannel.Game);
+				return;
+			}
+
+			if (!lobby.StartGame(_localPlayerId))
+			{
+				ConsoleSystem.LogErr("Cannot start game: failed to transition lobby state", ConsoleChannel.Game);
+				return;
+			}
 
             ConsoleSystem.Log($"Starting game for lobby '{lobby.DisplayName}'", ConsoleChannel.Game);
             GameEvent.DispatchGlobal(new LobbyStartedEvent(lobby.LobbyId));
+
+			// Trigger actual game start and scene transition using the lobby's selected map
+			var levelPath = lobby.Settings?.MapPath ?? "res://scenes/dev/dev.tscn";
+			GameEvent.DispatchGlobal(new NewGameStartedEvent(levelPath));
         }
         catch (Exception ex)
         {
@@ -526,6 +618,32 @@ public partial class LobbyService : BaseService,
                 {
                     ConsoleSystem.Log($"  - {player.DisplayName} {(player.IsLeader ? "(Leader)" : "")} {(player.IsReady ? "(Ready)" : "")}", ConsoleChannel.Game);
                 }
+                return true;
+            }));
+
+        // Set current lobby map path: lobby_set_map <res://path/to/scene.tscn>
+        ConsoleSystem.Instance?.RegisterCommand(new ConsoleCommand(
+            "lobby_set_map",
+            "Set current lobby map path",
+            "lobby_set_map <scenePath>",
+            async (args) =>
+            {
+                if (args.Length == 0)
+                {
+                    ConsoleSystem.Log("Usage: lobby_set_map <scenePath>", ConsoleChannel.Game);
+                    return false;
+                }
+
+                var current = GetCurrentPlayerLobby();
+                if (current == null)
+                {
+                    ConsoleSystem.Log("Not in a lobby", ConsoleChannel.Game);
+                    return false;
+                }
+
+                var settings = current.Settings?.Clone() ?? new LobbySettings();
+                settings.MapPath = string.Join(" ", args);
+                GameEvent.DispatchGlobal(new UpdateLobbySettingsRequestEvent(settings));
                 return true;
             }));
     }

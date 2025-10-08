@@ -121,6 +121,7 @@ ui_toggle_developer_console={
 }
 
 [steam]
+
 initialization/app_id=480
 initialization/initialize_on_startup=true
-initialization/embed_callbacks=true
+initialization/embed_callbacks=false
