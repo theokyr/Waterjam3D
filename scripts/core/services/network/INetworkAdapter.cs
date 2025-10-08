@@ -5,7 +5,7 @@ namespace Waterjam.Core.Services.Network;
 
 /// <summary>
 /// Pluggable networking adapter interface. Implementations create and manage a MultiplayerPeer
-/// for different backends (ENet, Steam, custom P2P, etc.).
+/// for different backends (Steam, custom P2P, etc.).
 /// </summary>
 public interface INetworkAdapter
 {

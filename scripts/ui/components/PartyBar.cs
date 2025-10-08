@@ -3,77 +3,80 @@ using Godot;
 using Waterjam.Events;
 using GodotSteam;
 using Waterjam.Core.Services;
+using Waterjam.Core.Systems.Console;
 
 namespace Waterjam.UI.Components;
 
 public partial class PartyBar : Control,
-	IGameEventHandler<PartyCreatedEvent>,
-	IGameEventHandler<PartyJoinedEvent>,
-	IGameEventHandler<PartyLeftEvent>,
-	IGameEventHandler<PartyMemberJoinedEvent>,
-	IGameEventHandler<PartyMemberLeftEvent>,
-	IGameEventHandler<PartyLeaderChangedEvent>,
-	IGameEventHandler<PartyDisbandedEvent>
+    IGameEventHandler<PartyCreatedEvent>,
+    IGameEventHandler<PartyJoinedEvent>,
+    IGameEventHandler<PartyLeftEvent>,
+    IGameEventHandler<PartyMemberJoinedEvent>,
+    IGameEventHandler<PartyMemberLeftEvent>,
+    IGameEventHandler<PartyLeaderChangedEvent>,
+    IGameEventHandler<PartyDisbandedEvent>
 {
-	private HBoxContainer _avatarRow;
-	private Button _inviteButton;
+    private HBoxContainer _avatarRow;
+    private Button _inviteButton;
 
-	public override void _Ready()
-	{
-		Name = "PartyBar";
-		ZIndex = 100;
+    public override void _Ready()
+    {
+        Name = "PartyBar";
+        ZIndex = 100;
 
-		_avatarRow = GetNodeOrNull<HBoxContainer>("Root/Avatars");
-		_inviteButton = GetNodeOrNull<Button>("Root/InviteButton");
+        _avatarRow = GetNodeOrNull<HBoxContainer>("Root/Avatars");
+        _inviteButton = GetNodeOrNull<Button>("Root/InviteButton");
 
-		Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] _Ready: avatarRow={_avatarRow != null}, inviteButton={_inviteButton != null}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+        ConsoleSystem.Log($"[PartyBar] _Ready: avatarRow={_avatarRow != null}, inviteButton={_inviteButton != null}", ConsoleChannel.UI);
 
-		if (_avatarRow == null || _inviteButton == null)
-		{
-			// Fallback: build minimal layout programmatically to remain functional without a .tscn
-			AnchorRight = 1.0f;
-			AnchorTop = 0f;
-			AnchorBottom = 0f;
-			OffsetRight = 0f;
-			OffsetTop = 8f;
-			OffsetBottom = 56f;
-			GrowHorizontal = GrowDirection.Both;
+        if (_avatarRow == null || _inviteButton == null)
+        {
+            // Fallback: build minimal layout programmatically to remain functional without a .tscn
+            AnchorRight = 1.0f;
+            AnchorTop = 0f;
+            AnchorBottom = 0f;
+            OffsetRight = 0f;
+            OffsetTop = 8f;
+            OffsetBottom = 56f;
+            GrowHorizontal = GrowDirection.Both;
 
-			var root = new HBoxContainer();
-			root.Name = "Root";
-			root.Alignment = BoxContainer.AlignmentMode.End;
-			root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-			root.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-			AddChild(root);
+            var root = new HBoxContainer();
+            root.Name = "Root";
+            root.Alignment = BoxContainer.AlignmentMode.End;
+            root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            root.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            AddChild(root);
 
-			_avatarRow = new HBoxContainer();
-			_avatarRow.Name = "Avatars";
-			_avatarRow.Alignment = BoxContainer.AlignmentMode.End;
-			_avatarRow.AddThemeConstantOverride("separation", 6);
-			root.AddChild(_avatarRow);
+            _avatarRow = new HBoxContainer();
+            _avatarRow.Name = "Avatars";
+            _avatarRow.Alignment = BoxContainer.AlignmentMode.End;
+            _avatarRow.AddThemeConstantOverride("separation", 6);
+            root.AddChild(_avatarRow);
 
-			_inviteButton = new Button();
-			_inviteButton.Name = "InviteButton";
-			_inviteButton.Text = "+";
-			_inviteButton.TooltipText = "Invite to Party";
-			_inviteButton.FocusMode = FocusModeEnum.None;
-			_inviteButton.CustomMinimumSize = new Vector2(32, 32);
-			root.AddChild(_inviteButton);
-		}
+            _inviteButton = new Button();
+            _inviteButton.Name = "InviteButton";
+            _inviteButton.Text = "+";
+            _inviteButton.TooltipText = "Invite to Party";
+            _inviteButton.FocusMode = FocusModeEnum.None;
+            _inviteButton.CustomMinimumSize = new Vector2(32, 32);
+            root.AddChild(_inviteButton);
+        }
 
-		if (_inviteButton != null)
-		{
-			_inviteButton.Pressed += OnInvitePressed;
-			Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] Invite button connected. Position=[X={_inviteButton.Position.X}, Y={_inviteButton.Position.Y}], Disabled={_inviteButton.Disabled}, Visible={_inviteButton.Visible}, MouseFilter={_inviteButton.MouseFilter}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
-		}
+        if (_inviteButton != null)
+        {
+            _inviteButton.Pressed += OnInvitePressed;
+        }
 
-		Refresh();
-	}
+        Refresh();
+
+        ConsoleSystem.Log($"[PartyBar] Invite button connected. Position=[X={_inviteButton.Position.X}, Y={_inviteButton.Position.Y}], Disabled={_inviteButton.Disabled}, Visible={_inviteButton.Visible}, MouseFilter={_inviteButton.MouseFilter}", ConsoleChannel.UI);
+
+    }
 
     private void OnInvitePressed()
     {
-        Waterjam.Core.Systems.Console.ConsoleSystem.Log("[PartyBar] Invite button PRESSED!", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
-        
+        ConsoleSystem.Log("[PartyBar] Invite button PRESSED!", ConsoleChannel.UI);
+
         // Open Steam overlay to invite friends if Steam is available
         if (PlatformService.IsSteamInitialized)
         {
@@ -90,11 +93,11 @@ public partial class PartyBar : Control,
                         if (lobbyId != 0)
                         {
                             Steam.ActivateGameOverlayInviteDialog(lobbyId);
-                            Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] Opened Steam friend invite overlay for lobby {lobbyId}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                            ConsoleSystem.Log($"[PartyBar] Opened Steam friend invite overlay for lobby {lobbyId}", ConsoleChannel.UI);
                         }
                         else
                         {
-                            Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[PartyBar] No Steam lobby available yet, waiting for lobby creation", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                            ConsoleSystem.LogWarn("[PartyBar] No Steam lobby available yet, waiting for lobby creation", ConsoleChannel.UI);
                         }
                     }
                     else
@@ -108,11 +111,11 @@ public partial class PartyBar : Control,
                             if (lobbyId != 0)
                             {
                                 Steam.ActivateGameOverlayInviteDialog(lobbyId);
-                                Waterjam.Core.Systems.Console.ConsoleSystem.Log($"[PartyBar] Opened Steam friend invite overlay for lobby {lobbyId} after auto-create", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                                ConsoleSystem.Log($"[PartyBar] Opened Steam friend invite overlay for lobby {lobbyId} after auto-create", ConsoleChannel.UI);
                             }
                             else
                             {
-                                Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[PartyBar] Steam lobby still not ready after delay", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                                ConsoleSystem.LogWarn("[PartyBar] Steam lobby still not ready after delay", ConsoleChannel.UI);
                             }
                         };
                     }
@@ -120,7 +123,7 @@ public partial class PartyBar : Control,
             }
             catch (System.Exception ex)
             {
-                Waterjam.Core.Systems.Console.ConsoleSystem.LogErr($"[PartyBar] Failed to open Steam invite: {ex.Message}", Waterjam.Core.Systems.Console.ConsoleChannel.UI);
+                ConsoleSystem.LogErr($"[PartyBar] Failed to open Steam invite: {ex.Message}", ConsoleChannel.UI);
             }
         }
         else
@@ -130,18 +133,18 @@ public partial class PartyBar : Control,
         }
     }
 
-	private void Refresh()
-	{
-		_avatarRow?.QueueFreeChildren();
+    private void Refresh()
+    {
+        _avatarRow?.QueueFreeChildren();
 
         var partyService = GetNodeOrNull("/root/PartyService") as Waterjam.Game.Services.Party.PartyService;
-		if (partyService == null)
-		{
-			_inviteButton.Disabled = true;
-			return;
-		}
+        if (partyService == null)
+        {
+            _inviteButton.Disabled = true;
+            return;
+        }
 
-		_inviteButton.Disabled = false;
+        _inviteButton.Disabled = false;
         var party = partyService.GetCurrentPlayerParty();
         var localId = partyService.GetLocalPlayerId();
 
@@ -153,39 +156,39 @@ public partial class PartyBar : Control,
         }
 
         if (party != null)
-		{
-			foreach (var member in party.Members.Where(m => m.PlayerId != localId))
-			{
-				_avatarRow.AddChild(CreateAvatar(member.PlayerId, member.IsLeader, member.DisplayName));
-			}
-		}
+        {
+            foreach (var member in party.Members.Where(m => m.PlayerId != localId))
+            {
+                _avatarRow.AddChild(CreateAvatar(member.PlayerId, member.IsLeader, member.DisplayName));
+            }
+        }
         else
         {
             // Not in a party: show hint avatar slot to indicate invite ability
             var hint = new Label { Text = "Invite+", ThemeTypeVariation = "CaptionLabel" };
             _avatarRow.AddChild(hint);
         }
-	}
+    }
 
     private Control CreateAvatar(string playerId, bool isLeader, string display)
-	{
+    {
         var vb = new VBoxContainer();
-		vb.CustomMinimumSize = new Vector2(48, 48);
-		vb.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-		vb.Alignment = BoxContainer.AlignmentMode.Center;
+        vb.CustomMinimumSize = new Vector2(48, 48);
+        vb.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        vb.Alignment = BoxContainer.AlignmentMode.Center;
 
         var avatar = BuildAvatarImage(playerId);
         vb.AddChild(avatar);
 
-		var label = new Label();
-		label.Text = display;
-		label.ThemeTypeVariation = "CaptionLabel";
-		label.HorizontalAlignment = HorizontalAlignment.Center;
-		vb.AddChild(label);
+        var label = new Label();
+        label.Text = display;
+        label.ThemeTypeVariation = "CaptionLabel";
+        label.HorizontalAlignment = HorizontalAlignment.Center;
+        vb.AddChild(label);
 
-		vb.TooltipText = isLeader ? $"{display} (Leader)" : display;
-		return vb;
-	}
+        vb.TooltipText = isLeader ? $"{display} (Leader)" : display;
+        return vb;
+    }
 
     private Control BuildAvatarImage(string playerId)
     {
@@ -264,20 +267,20 @@ public partial class PartyBar : Control,
 
     public void OnGameEvent(PartyCreatedEvent e) { CallDeferred(nameof(Refresh)); }
     public void OnGameEvent(PartyJoinedEvent e) { CallDeferred(nameof(Refresh)); }
-	public void OnGameEvent(PartyLeftEvent e) => CallDeferred(nameof(Refresh));
-	public void OnGameEvent(PartyMemberJoinedEvent e) => CallDeferred(nameof(Refresh));
-	public void OnGameEvent(PartyMemberLeftEvent e) => CallDeferred(nameof(Refresh));
-	public void OnGameEvent(PartyLeaderChangedEvent e) => CallDeferred(nameof(Refresh));
-	public void OnGameEvent(PartyDisbandedEvent e) => CallDeferred(nameof(Refresh));
+    public void OnGameEvent(PartyLeftEvent e) => CallDeferred(nameof(Refresh));
+    public void OnGameEvent(PartyMemberJoinedEvent e) => CallDeferred(nameof(Refresh));
+    public void OnGameEvent(PartyMemberLeftEvent e) => CallDeferred(nameof(Refresh));
+    public void OnGameEvent(PartyLeaderChangedEvent e) => CallDeferred(nameof(Refresh));
+    public void OnGameEvent(PartyDisbandedEvent e) => CallDeferred(nameof(Refresh));
 }
 
 public static class NodeExtensions
 {
-	public static void QueueFreeChildren(this Node node)
-	{
-		foreach (var child in node.GetChildren())
-		{
-			(child as Node)?.QueueFree();
-		}
-	}
+    public static void QueueFreeChildren(this Node node)
+    {
+        foreach (var child in node.GetChildren())
+        {
+            (child as Node)?.QueueFree();
+        }
+    }
 }

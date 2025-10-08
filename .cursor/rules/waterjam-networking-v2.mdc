@@ -163,7 +163,6 @@ UI Updates + Network Actions
 
 ### Modifiable via Code
 - `NetworkConfig` in `NetworkService.cs`
-- `LobbySettings` in `LobbyService.cs`
 - Player spawn positions in `NetworkService.SpawnPlayerForClient()`
 
 ## Known Limitations

@@ -3,7 +3,7 @@ using System;
 namespace Waterjam.Domain.Party;
 
 /// <summary>
-/// Represents a member of a party.
+/// Represents a member in a party.
 /// </summary>
 public class PartyMember : IEquatable<PartyMember>
 {
@@ -18,27 +18,37 @@ public class PartyMember : IEquatable<PartyMember>
     public string DisplayName { get; set; }
 
     /// <summary>
-    /// Whether this member is the party leader.
+    /// Whether this player is the lobby leader.
     /// </summary>
     public bool IsLeader { get; set; }
 
     /// <summary>
-    /// Whether this member is ready (for lobby scenarios).
+    /// Whether this player is ready to start the game.
     /// </summary>
     public bool IsReady { get; set; }
 
     /// <summary>
-    /// When this member joined the party.
+    /// When this player joined the lobby.
     /// </summary>
     public DateTime JoinedAt { get; }
 
     /// <summary>
-    /// Additional metadata about the player (level, class, etc.).
+    /// Player's selected character/class.
+    /// </summary>
+    public string SelectedCharacter { get; set; }
+
+    /// <summary>
+    /// Player's connection status.
+    /// </summary>
+    public PlayerConnectionStatus ConnectionStatus { get; set; } = PlayerConnectionStatus.Connected;
+
+    /// <summary>
+    /// Additional metadata about the player.
     /// </summary>
     public string Metadata { get; set; }
 
     /// <summary>
-    /// Creates a new party member.
+    /// Creates a new lobby player.
     /// </summary>
     public PartyMember(string playerId, bool isLeader = false, string displayName = null)
     {
@@ -73,4 +83,25 @@ public class PartyMember : IEquatable<PartyMember>
     {
         return $"{DisplayName} ({PlayerId})";
     }
+}
+
+/// <summary>
+/// Connection status of a player in the lobby.
+/// </summary>
+public enum PlayerConnectionStatus
+{
+    /// <summary>
+    /// Player is connected and active.
+    /// </summary>
+    Connected,
+
+    /// <summary>
+    /// Player is away/inactive.
+    /// </summary>
+    Away,
+
+    /// <summary>
+    /// Player has disconnected.
+    /// </summary>
+    Disconnected
 }

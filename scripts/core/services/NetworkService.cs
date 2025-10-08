@@ -19,7 +19,6 @@ namespace Waterjam.Core.Services;
 public partial class NetworkService : BaseService,
     IGameEventHandler<GameInitializedEvent>,
     IGameEventHandler<SceneLoadEvent>,
-    IGameEventHandler<LobbyStartedEvent>,
     IGameEventHandler<NewGameStartedEvent>
 {
     // Configuration
@@ -102,7 +101,7 @@ public partial class NetworkService : BaseService,
         // When a new gameplay scene is loaded in multiplayer, spawn players for all connected peers
         if (IsServer && !string.Equals(eventArgs.ScenePath, "res://scenes/ui/MainMenu.tscn", System.StringComparison.OrdinalIgnoreCase))
         {
-            ConsoleSystem.Log($"[NetworkService] Scene loaded in multiplayer: {eventArgs.ScenePath}, spawning all players", ConsoleChannel.Network);
+            ConsoleSystem.Log($"[NetworkService] Scene loaded in multiplayer: {eventArgs.ScenePath}, spawning all players (connected={_connectedClients.Count})", ConsoleChannel.Network);
             
             // Give the scene a moment to initialize - use CallDeferred to ensure we're in the proper context
             CallDeferred(MethodName.SpawnAllPlayers);
@@ -129,11 +128,7 @@ public partial class NetworkService : BaseService,
         }
     }
 
-    public void OnGameEvent(LobbyStartedEvent eventArgs)
-    {
-        ConsoleSystem.Log("[NetworkService] Lobby started, locking multiplayer session", ConsoleChannel.Network);
-        // Lobby has started, game is about to begin - session is locked
-    }
+    // Removed legacy LobbyStartedEvent handler during Party migration
 
     [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
     private void RpcLoadScene(string scenePath)
@@ -148,7 +143,7 @@ public partial class NetworkService : BaseService,
     {
         if (!IsServer) return;
 
-        ConsoleSystem.Log("[NetworkService] Spawning all players after scene load", ConsoleChannel.Network);
+        ConsoleSystem.Log($"[NetworkService] Spawning all players after scene load; server will spawn {1 + _connectedClients.Keys.Count(k => k != 1)} players", ConsoleChannel.Network);
 
         // Spawn local player (peer ID 1 for server)
         SpawnPlayerForClient(1);
@@ -180,7 +175,12 @@ public partial class NetworkService : BaseService,
 
         try
         {
-            InitializeAdapter();
+            // Preserve existing adapter configuration (e.g., preferred Steam lobby)
+            // Only (re)initialize if we don't have an adapter yet or backend changed
+            if (_adapter == null || _adapter.Backend != _config.Backend)
+            {
+                InitializeAdapter();
+            }
 
             if (_adapter == null)
             {
@@ -212,6 +212,22 @@ public partial class NetworkService : BaseService,
             ConsoleSystem.LogErr($"[NetworkService] Failed to start server: {ex.Message}", ConsoleChannel.Network);
             _adapter?.Disconnect();
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Configure adapter to reuse an existing Steam lobby if possible.
+    /// Call before StartServer when a party lobby exists.
+    /// </summary>
+    public void ConfigureSteamLobbyReuse(ulong lobbyId)
+    {
+        if (_adapter is SteamNetworkAdapter steam)
+        {
+            if (lobbyId != 0)
+            {
+                steam.SetPreferredLobbyId(lobbyId);
+                ConsoleSystem.Log($"[NetworkService] Configured Steam adapter to reuse lobby {lobbyId}", ConsoleChannel.Network);
+            }
         }
     }
 
@@ -331,7 +347,7 @@ public partial class NetworkService : BaseService,
             }
 
             // Find a spawn point (for now, just use origin with some offset)
-            var spawnPosition = new Vector3(peerId * 2, 2, 0); // Offset each player slightly
+            var spawnPosition = new Vector3(peerId * 2, 2, 0);
 
             // Load the player scene
             var playerScene = GD.Load<PackedScene>("res://scenes/Player.tscn");
@@ -383,6 +399,14 @@ public partial class NetworkService : BaseService,
 
             // Notify other clients about the new player
             GameEvent.DispatchGlobal(new NetworkPlayerSpawnedEvent(peerId, spawnPosition, $"Player_{peerId}"));
+
+            // Broadcast spawn to clients so they instantiate their local proxies
+            var multiplayer = GetTree()?.GetMultiplayer();
+            if (multiplayer?.MultiplayerPeer != null && multiplayer.MultiplayerPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+            {
+                Rpc(MethodName.RpcClientSpawnPlayer, (int)peerId, spawnPosition, playerInstance.Name);
+                ConsoleSystem.Log($"[NetworkService] Broadcasted RpcClientSpawnPlayer for peer {peerId}", ConsoleChannel.Network);
+            }
         }
         catch (Exception ex)
         {
@@ -411,6 +435,14 @@ public partial class NetworkService : BaseService,
 
             // Notify other clients about the player leaving
             GameEvent.DispatchGlobal(new NetworkPlayerRemovedEvent(peerId));
+
+            // Broadcast despawn to clients
+            var multiplayer = GetTree()?.GetMultiplayer();
+            if (multiplayer?.MultiplayerPeer != null && multiplayer.MultiplayerPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+            {
+                Rpc(MethodName.RpcClientRemovePlayer, (int)peerId);
+                ConsoleSystem.Log($"[NetworkService] Broadcasted RpcClientRemovePlayer for peer {peerId}", ConsoleChannel.Network);
+            }
         }
     }
 
@@ -530,6 +562,69 @@ public partial class NetworkService : BaseService,
 
     #endregion
 
+    #region Client RPC Handlers
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RpcClientSpawnPlayer(int peerId, Vector3 position, string playerName)
+    {
+        // Only clients should execute this
+        if (IsServer) return;
+
+        try
+        {
+            if (_networkedPlayers.ContainsKey(peerId))
+            {
+                ConsoleSystem.Log($"[NetworkService] RpcClientSpawnPlayer ignored; peer {peerId} already exists", ConsoleChannel.Network);
+                return;
+            }
+
+            var tree = GetTree();
+            var currentScene = tree?.CurrentScene;
+            if (currentScene == null)
+            {
+                ConsoleSystem.LogErr("[NetworkService] RpcClientSpawnPlayer: CurrentScene is null", ConsoleChannel.Network);
+                return;
+            }
+
+            var playerScene = GD.Load<PackedScene>("res://scenes/Player.tscn");
+            var playerInstance = playerScene.Instantiate<PlayerEntity>();
+            playerInstance.Name = playerName ?? $"Player_{peerId}";
+            try
+            {
+                playerInstance.SetMultiplayerAuthority(peerId);
+            }
+            catch (Exception authEx)
+            {
+                ConsoleSystem.LogWarn($"[NetworkService] RpcClientSpawnPlayer: Failed to set authority for {peerId}: {authEx.Message}", ConsoleChannel.Network);
+            }
+
+            currentScene.AddChild(playerInstance);
+            playerInstance.GlobalPosition = position;
+            _networkedPlayers[peerId] = playerInstance;
+
+            ConsoleSystem.Log($"[NetworkService] RpcClientSpawnPlayer: Spawned peer {peerId} at {position}", ConsoleChannel.Network);
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] RpcClientSpawnPlayer failed: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RpcClientRemovePlayer(int peerId)
+    {
+        if (IsServer) return;
+
+        if (_networkedPlayers.TryGetValue(peerId, out var player))
+        {
+            player.QueueFree();
+            _networkedPlayers.Remove(peerId);
+            ConsoleSystem.Log($"[NetworkService] RpcClientRemovePlayer: Removed peer {peerId}", ConsoleChannel.Network);
+        }
+    }
+
+    #endregion
+
     #region General Methods
 
     /// <summary>
@@ -594,7 +689,7 @@ public partial class NetworkService : BaseService,
             AutoStartLocalServer = false, // Don't auto-start; let explicit SP/MP flow handle it
             EnableCompression = true,
             InterpolationDelay = 100, // ms
-            Backend = NetworkBackend.ENet
+            Backend = NetworkBackend.Steam
         };
     }
 
@@ -734,7 +829,7 @@ public partial class NetworkService : BaseService,
         consoleSystem.RegisterCommand(new ConsoleCommand(
             "net_backend",
             "Get or set networking backend",
-            "net_backend [ENet|Steam|P2P|Null]",
+            "net_backend [Steam|P2P|Null]",
             async (args) =>
             {
                 if (args.Length == 0)
@@ -745,7 +840,7 @@ public partial class NetworkService : BaseService,
 
                 if (!System.Enum.TryParse<NetworkBackend>(args[0], true, out var backend))
                 {
-                    ConsoleSystem.Log("Usage: net_backend [ENet|Steam|P2P|Null]", ConsoleChannel.Network);
+                    ConsoleSystem.Log("Usage: net_backend [Steam|P2P|Null]", ConsoleChannel.Network);
                     return false;
                 }
 
@@ -768,9 +863,6 @@ public partial class NetworkService : BaseService,
     {
         switch (_config.Backend)
         {
-            case NetworkBackend.ENet:
-                _adapter = new ENetNetworkAdapter();
-                break;
             case NetworkBackend.Steam:
                 _adapter = new SteamNetworkAdapter();
                 break;
@@ -808,7 +900,7 @@ public class NetworkConfig
     public bool AutoStartLocalServer { get; set; } = true;
     public bool EnableCompression { get; set; } = true;
     public int InterpolationDelay { get; set; } = 100; // milliseconds
-    public NetworkBackend Backend { get; set; } = NetworkBackend.ENet;
+    public NetworkBackend Backend { get; set; } = NetworkBackend.Steam;
 }
 
 /// <summary>

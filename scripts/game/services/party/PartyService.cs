@@ -4,6 +4,7 @@ using System.Linq;
 using Godot;
 using GodotSteam;
 using Waterjam.Core.Services;
+using Waterjam.Core.Services.Network;
 using Waterjam.Core.Systems.Console;
 using Waterjam.Domain.Party;
 using Waterjam.Domain.Chat;
@@ -29,6 +30,8 @@ public partial class PartyService : BaseService,
     private string _localPlayerId;
     private Random _random = new();
     private ulong _currentSteamLobbyId = 0; // Track the current party's Steam lobby ID for invites
+    private string _lastConnectLeaderId = null; // Prevent repeated client connect attempts
+    private bool _gameStartingProcessed = false; // Prevent infinite loop when client processes game_starting flag
 
     public override void _Ready()
     {
@@ -70,7 +73,8 @@ public partial class PartyService : BaseService,
         Steam.LobbyChatUpdate += OnSteamLobbyChatUpdate;
         Steam.LobbyCreated += OnSteamLobbyCreated;
         Steam.LobbyJoined += OnSteamLobbyJoined;
-        // TODO: Add LobbyDataUpdate for navigation messages once signature is resolved
+        Steam.LobbyDataUpdate += OnSteamLobbyDataUpdate;
+        Steam.LobbyMessage += OnSteamLobbyMessage;
     }
 
     private void OnSteamLobbyCreated(long result, ulong lobbyId)
@@ -115,32 +119,164 @@ public partial class PartyService : BaseService,
                 // We joined a party lobby - create local party state
                 var hostSteamId = Steam.GetLobbyOwner(lobbyId);
                 var hostId = hostSteamId.ToString();
-                
+
                 var party = new Waterjam.Domain.Party.Party(partyId, partyCode, hostId, partyName);
                 _parties[partyId] = party;
                 _playerPartyMap[_localPlayerId] = partyId;
                 _currentSteamLobbyId = lobbyId;
-                
-                // Add ourselves as a member
+
+                // Add ourselves as a member (not as leader)
                 var localName = Steam.GetPersonaName();
-                var localMember = new Waterjam.Domain.Party.PartyMember(_localPlayerId, false, localName);
+                var localMember = new PartyMember(_localPlayerId, false, localName);
                 party.AddMember(localMember);
-                
+
                 // Create chat channel
                 var chatChannel = new ChatChannel(partyId, $"Party: {party.DisplayName}", ChatChannelType.Party);
                 _partyChatChannels[partyId] = chatChannel;
-                
-                ConsoleSystem.Log($"[PartyService] Joined party '{partyName}' via Steam lobby", ConsoleChannel.Game);
+
+                ConsoleSystem.Log($"[PartyService] Joined party '{partyName}' via Steam lobby, host: {hostId}, local: {_localPlayerId}", ConsoleChannel.Game);
                 GameEvent.DispatchGlobal(new PartyJoinedEvent(partyId, _localPlayerId));
+            }
+            else if (!string.IsNullOrEmpty(partyId) && _parties.ContainsKey(partyId))
+            {
+                // We joined a party lobby but already have local party state
+                var party = _parties[partyId];
+                if (!_playerPartyMap.ContainsKey(_localPlayerId))
+                {
+                    _playerPartyMap[_localPlayerId] = partyId;
+                    _currentSteamLobbyId = lobbyId;
+
+                    // Add ourselves as a member if not already present
+                    var localName = Steam.GetPersonaName();
+                    var localMember = new Waterjam.Domain.Party.PartyMember(_localPlayerId, false, localName);
+                    if (!party.ContainsPlayer(_localPlayerId))
+                    {
+                        party.AddMember(localMember);
+                    }
+
+                    ConsoleSystem.Log($"[PartyService] Updated existing party state for joined lobby, party: {party.DisplayName}", ConsoleChannel.Game);
+                    GameEvent.DispatchGlobal(new PartyJoinedEvent(partyId, _localPlayerId));
+                }
             }
         }
     }
 
-    // TODO: Re-implement lobby navigation sync with correct Steam callback signature
-    // private void OnSteamLobbyDataUpdate(ulong lobbyId)
-    // {
-    //     // Check for lobby navigation message and dispatch UiShowLobbyScreenEvent
-    // }
+    private void OnSteamLobbyDataUpdate(uint success, ulong lobbyId, ulong memberId)
+    {
+        if (success != 1) return; // 1 = k_EResultOK
+
+        // Check for game starting message
+        try
+        {
+            var gameStarting = Steam.GetLobbyData(lobbyId, "game_starting");
+            var gameLaunched = Steam.GetLobbyData(lobbyId, "game_launched");
+            var gameScenePath = Steam.GetLobbyData(lobbyId, "game_scene_path");
+            var gameLeader = Steam.GetLobbyData(lobbyId, "game_leader");
+            var gameLobbyId = Steam.GetLobbyData(lobbyId, "game_lobby_id");
+
+            // Check if game has been launched (host pressed "Start Game" in lobby panel)
+            if (!string.IsNullOrEmpty(gameLaunched) && gameLaunched == "true")
+            {
+                if (!string.IsNullOrEmpty(gameLeader) && gameLeader != _localPlayerId)
+                {
+                    ConsoleSystem.Log($"[PartyService] Game launched by host, loading scene: {gameScenePath}", ConsoleChannel.Game);
+                    
+                    // Load the scene directly
+                    var scenePath = !string.IsNullOrEmpty(gameScenePath) ? gameScenePath : "res://scenes/dev/dev.tscn";
+                    GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
+                    
+                    // Note: Don't clear the flag here - let the host do it
+                    // Clients shouldn't modify lobby data
+                    return;
+                }
+            }
+
+            // New flow: If game is starting and we're not the leader, trigger the game start flow
+            if (!string.IsNullOrEmpty(gameStarting) && gameStarting == "true" && !_gameStartingProcessed)
+            {
+                if (!string.IsNullOrEmpty(gameLeader) && gameLeader != _localPlayerId)
+                {
+                    _gameStartingProcessed = true; // Prevent processing this again
+                    ConsoleSystem.Log("[PartyService] Detected game starting, triggering multiplayer join flow", ConsoleChannel.Game);
+                    
+                    // Join the game lobby
+                    if (!string.IsNullOrEmpty(gameLobbyId))
+                    {
+                        ConsoleSystem.Log($"[PartyService] Joining game lobby {gameLobbyId}", ConsoleChannel.Game);
+                        GameEvent.DispatchGlobal(new JoinLobbyRequestEvent(gameLobbyId));
+                    }
+                    
+                    // Trigger the main menu to show lobby UI (this will handle networking connection)
+                    GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent());
+                    return;
+                }
+            }
+            
+            // Old flow support (legacy)
+            var leaderId = Steam.GetLobbyData(lobbyId, "lobby_leader_id");
+            var nav = Steam.GetLobbyData(lobbyId, "navigate_to_lobby");
+
+            if (!string.IsNullOrEmpty(nav) && nav == "true")
+            {
+                // If we are not the leader, navigate to lobby UI
+                if (!string.IsNullOrEmpty(leaderId) && leaderId != _localPlayerId)
+                {
+                    ConsoleSystem.Log("[PartyService] LobbyDataUpdate detected navigation to lobby (legacy)", ConsoleChannel.Game);
+                    GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent());
+
+                    // If we have a game lobby ID, try to join that lobby
+                    if (!string.IsNullOrEmpty(gameLobbyId))
+                    {
+                        ConsoleSystem.Log($"[PartyService] Found game lobby ID {gameLobbyId}, attempting to join", ConsoleChannel.Game);
+                        GameEvent.DispatchGlobal(new JoinLobbyRequestEvent(gameLobbyId));
+                    }
+
+                    // Ensure Steam backend is active, then attempt client connect to leader via Steam
+                    var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
+                    if (networkService != null)
+                    {
+                        if (networkService.CurrentBackend != NetworkBackend.Steam)
+                        {
+                            try
+                            {
+                                var reflectedConfig = networkService.GetType().GetField("_config", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                                var config = reflectedConfig?.GetValue(networkService) as NetworkConfig;
+                                if (config != null)
+                                {
+                                    config.Backend = NetworkBackend.Steam;
+                                    var initMethod = networkService.GetType().GetMethod("InitializeAdapter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                                    initMethod?.Invoke(networkService, null);
+                                    ConsoleSystem.Log("[PartyService] Switched to Steam networking backend (client)", ConsoleChannel.Network);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                ConsoleSystem.LogWarn($"[PartyService] Failed to switch backend to Steam: {ex.Message}", ConsoleChannel.Network);
+                            }
+                        }
+
+                        if (networkService.CurrentBackend == NetworkBackend.Steam && _lastConnectLeaderId != leaderId)
+                        {
+                            _lastConnectLeaderId = leaderId;
+                            try
+                            {
+                                networkService.ConnectToServer(leaderId, 0);
+                                ConsoleSystem.Log($"[PartyService] Connecting to lobby leader {leaderId} via Steam", ConsoleChannel.Network);
+                            }
+                            catch (Exception ex)
+                            {
+                                ConsoleSystem.LogWarn($"[PartyService] Failed to connect to leader {leaderId}: {ex.Message}", ConsoleChannel.Network);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[PartyService] Error in LobbyDataUpdate: {ex.Message}", ConsoleChannel.Game);
+        }
+    }
 
     public override void _Process(double delta)
     {
@@ -246,7 +382,61 @@ public partial class PartyService : BaseService,
         var message = chatChannel.SendMessage(senderPlayerId, senderDisplayName, content);
         GameEvent.DispatchGlobal(new PartyChatMessageEvent(partyId, message));
 
+        // Broadcast message via Steam lobby chat if we're in a Steam lobby
+        if (PlatformService.IsSteamInitialized && _currentSteamLobbyId != 0)
+        {
+            try
+            {
+                // Format: CHAT|senderPlayerId|senderDisplayName|content
+                var chatMessage = $"CHAT|{senderPlayerId}|{senderDisplayName}|{content}";
+                Steam.SendLobbyChatMsg(_currentSteamLobbyId, chatMessage);
+                ConsoleSystem.Log($"[PartyService] Sent chat message via Steam lobby", ConsoleChannel.Game);
+            }
+            catch (Exception ex)
+            {
+                ConsoleSystem.LogWarn($"[PartyService] Failed to send chat via Steam: {ex.Message}", ConsoleChannel.Game);
+            }
+        }
+
         return message;
+    }
+    
+    private void OnSteamLobbyMessage(ulong lobbyId, long userId, string message, long chatType)
+    {
+        try
+        {
+            // Only process our party's lobby
+            if (lobbyId != _currentSteamLobbyId) return;
+            
+            // Parse message format: CHAT|senderPlayerId|senderDisplayName|content
+            var parts = message.Split('|', 4);
+            if (parts.Length == 4 && parts[0] == "CHAT")
+            {
+                var senderPlayerId = parts[1];
+                var senderDisplayName = parts[2];
+                var content = parts[3];
+                
+                // Don't process our own messages (already added locally)
+                if (senderPlayerId == _localPlayerId) return;
+                
+                // Find the party for this lobby
+                var currentParty = GetCurrentPlayerParty();
+                if (currentParty == null) return;
+                
+                var chatChannel = _partyChatChannels.GetValueOrDefault(currentParty.PartyId);
+                if (chatChannel == null) return;
+                
+                // Add the message and dispatch event
+                var chatMessage = chatChannel.SendMessage(senderPlayerId, senderDisplayName, content);
+                GameEvent.DispatchGlobal(new PartyChatMessageEvent(currentParty.PartyId, chatMessage));
+                
+                ConsoleSystem.Log($"[PartyService] Received chat message from {senderDisplayName}: {content}", ConsoleChannel.Game);
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[PartyService] Error processing lobby chat message: {ex.Message}", ConsoleChannel.Game);
+        }
     }
 
     /// <summary>

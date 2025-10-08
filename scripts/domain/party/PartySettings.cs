@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Waterjam.Domain.Lobby;
+namespace Waterjam.Domain.Party;
 
 /// <summary>
-/// Settings for a game lobby.
+/// Settings for a game party.
 /// </summary>
-public class LobbySettings : IEquatable<LobbySettings>
+public class PartySettings : IEquatable<PartySettings>
 {
     /// <summary>
     /// The map/scene to play on.
@@ -72,9 +72,9 @@ public class LobbySettings : IEquatable<LobbySettings>
     /// <summary>
     /// Creates a copy of these settings.
     /// </summary>
-    public LobbySettings Clone()
+    public PartySettings Clone()
     {
-        return new LobbySettings
+        return new PartySettings
         {
             MapPath = MapPath,
             GameMode = GameMode,
@@ -91,7 +91,7 @@ public class LobbySettings : IEquatable<LobbySettings>
         };
     }
 
-    public bool Equals(LobbySettings other)
+    public bool Equals(PartySettings other)
     {
         if (ReferenceEquals(null, other)) return false;
         if (ReferenceEquals(this, other)) return true;
@@ -116,7 +116,7 @@ public class LobbySettings : IEquatable<LobbySettings>
         if (ReferenceEquals(null, obj)) return false;
         if (ReferenceEquals(this, obj)) return true;
         if (obj.GetType() != this.GetType()) return false;
-        return Equals((LobbySettings)obj);
+        return Equals((PartySettings)obj);
     }
 
     public override int GetHashCode()

@@ -101,3 +101,5 @@ Console commands via MCP
 - Manual drop (no tool): write a text file with the command to `%APPDATA%\Godot\app_userdata\Waterjam3D\mcp\inbox`.
 - Check output: prefer `mcp_godot_get_debug_output()` while running; or read latest log in `C:\Users\theo\AppData\Roaming\Godot\app_userdata\Waterjam3D\logs\`.
 
+Documentation
+- You can write docs in markdown format in the `docs` directory.

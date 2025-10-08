@@ -5,7 +5,6 @@ namespace Waterjam.Core.Services.Network;
 /// </summary>
 public enum NetworkBackend
 {
-    ENet,
     Steam,
     P2P,
     Null

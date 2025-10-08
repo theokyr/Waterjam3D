@@ -26,7 +26,6 @@ This document summarizes the complete end-to-end multiplayer implementation with
   1. Validates Steam initialization
   2. Switches NetworkService to Steam backend
   3. Creates Steam lobby via `SteamNetworkAdapter`
-  4. Creates game lobby via `LobbyService` (auto-adds party members)
   5. Shows LobbyUI screen
 
 ### 4. Ready System & Leader Controls ✅
@@ -40,7 +39,6 @@ This document summarizes the complete end-to-end multiplayer implementation with
 ### 5. Game Start & Scene Transition ✅
 - **Leader Action**: Leader clicks "Start Game" in lobby
 - **Process**:
-  1. `LobbyService` handles `StartGameRequestEvent`
   2. Updates lobby status to `InGame`
   3. Dispatches `LobbyStartedEvent`
   4. Dispatches `NewGameStartedEvent` with scene path
@@ -59,13 +57,13 @@ This document summarizes the complete end-to-end multiplayer implementation with
   - Positions players with offset (peerId * 2, 2, 0)
 
 ### 7. GodotSteam Multiplayer Integration ✅
-- **Hybrid Approach**:
-  - Steam for matchmaking, lobbies, and friend invites
-  - ENet for actual game networking (reliable, performant)
+- **Steam Integration**:
+  - Steam for matchmaking, lobbies, friend invites, and P2P networking
+  - Fully integrated Steam networking backend
 - **SteamNetworkAdapter**:
   - Handles Steam lobby creation callbacks
   - Manages lobby join requests
-  - Creates ENet peer for game networking
+  - Creates Steam P2P connections for game networking
   - Properly wires Steam.LobbyCreated and Steam.LobbyMatchList events
 - **NetworkService**:
   - Manages both server and client modes
@@ -120,7 +118,7 @@ UI Updates + Network Actions
 5. **Persona**: `Steam.GetPersonaName()` for display names
 
 ### Network Architecture
-- **Backend**: Hybrid (Steam matchmaking + ENet networking)
+- **Backend**: Steam (Steam P2P networking)
 - **Mode**: Server-authoritative
 - **Peer Management**: Via `NetworkService._connectedClients`
 - **Player Spawning**: Server-side via `SpawnPlayerForClient()`
@@ -155,7 +153,6 @@ UI Updates + Network Actions
 - **Snapshot Rate**: 15 Hz (every 2 ticks)
 - **Default Scene**: `res://scenes/dev/dev.tscn`
 - **Lobby Type**: FriendsOnly (Steam)
-- **Port**: 7777 (ENet server)
 
 ### Modifiable via Code
 - `NetworkConfig` in `NetworkService.cs`
@@ -164,11 +161,10 @@ UI Updates + Network Actions
 
 ## Known Limitations
 
-1. **Steam P2P**: Not implemented - using ENet instead (reliable and simpler)
-2. **Lobby Join Code**: Generated but not actively used for joining
-3. **Voice Chat**: VoiceChatService exists but needs additional integration
-4. **Cross-Platform**: Currently Windows-only due to GodotSteam
-5. **State Synchronization**: Basic player spawning only - no full replication yet
+1. **Lobby Join Code**: Generated but not actively used for joining
+2. **Voice Chat**: VoiceChatService exists but needs additional integration
+3. **Cross-Platform**: Currently Windows-only due to GodotSteam
+4. **State Synchronization**: Basic player spawning only - no full replication yet
 
 ## Next Steps for Full Multiplayer
 
@@ -220,5 +216,5 @@ The multiplayer system is now feature-complete for basic networked gameplay. Pla
 - Spawn into networked game scenes
 - All connected via GodotSteam integration
 
-The hybrid approach (Steam for matchmaking + ENet for networking) provides a solid foundation for building out full multiplayer gameplay features.
+The Steam-based approach provides a solid foundation for building out full multiplayer gameplay features.
 

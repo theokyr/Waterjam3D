@@ -6,9 +6,8 @@ using Waterjam.Core.Services.Network;
 using Waterjam.Core.Systems.Console;
 using Waterjam.Game.Services;
 using Waterjam.Game.Services.Party;
-using Waterjam.Game.Services.Lobby;
+using System;
 using System.Linq;
-using Waterjam.Domain.Lobby;
 using GodotSteam;
 
 namespace Waterjam.UI;
@@ -31,8 +30,24 @@ public partial class MainMenu : Control,
     {
         _gameService = GetNode<GameService>("/root/GameService");
         InitializeMainMenu();
+        InitializePartyChatPanel();
         // PartyBar is now embedded in the scene, no need to mount programmatically
         _isInitialized = true;
+    }
+    
+    private void InitializePartyChatPanel()
+    {
+        try
+        {
+            // Add party chat panel to the main menu (it will show/hide itself based on party status)
+            var chatPanel = new Waterjam.UI.Components.PartyChatPanel();
+            AddChild(chatPanel);
+            ConsoleSystem.Log("[MainMenu] Party chat panel initialized", ConsoleChannel.UI);
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[MainMenu] Failed to initialize party chat panel: {ex.Message}", ConsoleChannel.UI);
+        }
     }
 
     private void InitializeMainMenu()
@@ -45,10 +60,17 @@ public partial class MainMenu : Control,
             return;
         }
 
-        SetupButton("NewGameButton", OnStartButtonPressed);
-        SetupButton("MultiplayerButton", OnMultiplayerButtonPressed);
+        SetupButton("NewGameButton", OnStartGamePressed);
         SetupButton("OptionsButton", OnOptionsButtonPressed);
         SetupButton("QuitButton", OnQuitButtonPressed);
+        
+        // Hide multiplayer button - we have a unified flow now
+        var multiplayerButton = _menuButtons.GetNodeOrNull<Button>("MultiplayerButton");
+        if (multiplayerButton != null)
+        {
+            multiplayerButton.Visible = false;
+        }
+        
         _menuButtons.GetNode<Button>("NewGameButton")?.GrabFocus();
     }
 
@@ -69,19 +91,37 @@ public partial class MainMenu : Control,
         GameEvent.DispatchGlobal(new SoundPlaySfxEvent("res://resources/sounds/click.wav"));
     }
 
-    private void OnStartButtonPressed()
+    private void OnStartGamePressed()
     {
         OnButtonPressed();
-        // Start new game via event so GameService owns the flow
-        GameEvent.DispatchGlobal(new NewGameStartedEvent("res://scenes/dev/dev.tscn"));
-        // Hide self; UiService will manage further UI
-        CallDeferred(Node.MethodName.QueueFree);
-    }
-
-    private void OnMultiplayerButtonPressed()
-    {
-        OnButtonPressed();
-		StartMultiplayerFlow();
+        
+        // Check if we have a party (we always should, even if solo)
+        var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
+        if (partyService == null)
+        {
+            // Fallback to simple solo game start
+            GameEvent.DispatchGlobal(new NewGameStartedEvent("res://scenes/dev/dev.tscn"));
+            CallDeferred(Node.MethodName.QueueFree);
+            return;
+        }
+        
+        var currentParty = partyService.GetCurrentPlayerParty();
+        var localPlayerId = partyService.GetLocalPlayerId();
+        
+        // If no party exists, auto-create one (user is always in a party)
+        if (currentParty == null && !string.IsNullOrEmpty(localPlayerId))
+        {
+            AutoCreateSoloParty(partyService, localPlayerId);
+            // Wait for party creation, then continue
+            GetTree().CreateTimer(0.5f).Timeout += () => OnStartGamePressed();
+            return;
+        }
+        
+        // Check if we're the party leader
+        bool isLeader = currentParty?.LeaderPlayerId == localPlayerId;
+        
+        // Start the unified game flow
+        StartUnifiedGameFlow(isLeader);
     }
 
     private void OnOptionsButtonPressed()
@@ -129,121 +169,210 @@ public partial class MainMenu : Control,
         _menuButtons.Visible = false;
     }
 
-    private void ShowLobbyUI()
+    private void AutoCreateSoloParty(PartyService partyService, string localPlayerId)
     {
-        var lobbyScene = GD.Load<PackedScene>("res://scenes/ui/LobbyUI.tscn");
-        var lobbyUI = lobbyScene.Instantiate<LobbyUI>();
-        AddChild(lobbyUI);
-        _menuButtons.Visible = false;
+        try
+        {
+            string displayName = "My Party";
+            if (PlatformService.IsSteamInitialized)
+            {
+                try
+                {
+                    var personaName = Steam.GetPersonaName();
+                    if (!string.IsNullOrWhiteSpace(personaName))
+                    {
+                        displayName = $"{personaName}'s Party";
+                    }
+                }
+                catch { }
+            }
+            
+            ConsoleSystem.Log($"[MainMenu] Auto-creating solo party: {displayName}", ConsoleChannel.UI);
+            GameEvent.DispatchGlobal(new CreatePartyRequestEvent(displayName, 8));
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[MainMenu] Failed to auto-create party: {ex.Message}", ConsoleChannel.UI);
+        }
     }
 
-	private void StartMultiplayerFlow()
-	{
-		// Ensure Platform/Steam readiness
-		var platformService = GetNodeOrNull<PlatformService>("/root/PlatformService");
-		if (platformService == null || !PlatformService.IsSteamInitialized)
-		{
-			ShowErrorDialog("Multiplayer Unavailable", "Steam is not initialized. Please start Steam and restart the game.");
-			return;
-		}
+    private void StartUnifiedGameFlow(bool isLeader)
+    {
+        try
+        {
+            var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
+            var currentParty = partyService?.GetCurrentPlayerParty();
+            var localPlayerId = partyService?.GetLocalPlayerId();
+            
+            // If solo (only us in party), just start the game immediately with default settings
+            if (currentParty == null || currentParty.Members.Count <= 1)
+            {
+                ConsoleSystem.Log("[MainMenu] Solo play - starting game with default settings", ConsoleChannel.UI);
+                GameEvent.DispatchGlobal(new NewGameStartedEvent("res://scenes/dev/dev.tscn"));
+                CallDeferred(Node.MethodName.QueueFree);
+                return;
+            }
+            
+            // Multiplayer flow - show lobby settings panel
+            ConsoleSystem.Log($"[MainMenu] Multiplayer flow - party has {currentParty.Members.Count} members, leader: {isLeader}", ConsoleChannel.UI);
+            
+                
+            // Initialize networking
+            if (isLeader)
+            {
+                InitializeNetworkingAsLeader(partyService);
+                
+                // Signal all party members to show lobby UI via Steam lobby data
+                var steamLobbyId = partyService.GetCurrentSteamLobbyId();
+                if (steamLobbyId != 0 && PlatformService.IsSteamInitialized)
+                {
+                    try
+                    {
+                        Steam.SetLobbyData(steamLobbyId, "game_starting", "true");
+                        Steam.SetLobbyData(steamLobbyId, "game_leader", localPlayerId);
+                        Steam.SetLobbyData(steamLobbyId, "game_lobby_id", currentParty.PartyId);
+                        ConsoleSystem.Log("[MainMenu] Notified party members that game is starting", ConsoleChannel.UI);
+                    }
+                    catch (Exception ex)
+                    {
+                        ConsoleSystem.LogWarn($"[MainMenu] Failed to notify party members: {ex.Message}", ConsoleChannel.UI);
+                    }
+                }
+            }
+            else
+            {
+                // Non-leader: connect to the host
+                InitializeNetworkingAsClient(partyService);
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[MainMenu] Failed to start unified game flow: {ex.Message}", ConsoleChannel.UI);
+            ShowErrorDialog("Game Start Failed", $"Failed to start game: {ex.Message}");
+        }
+    }
+    
+    private void InitializeNetworkingAsClient(PartyService partyService)
+    {
+        try
+        {
+            var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
+            if (networkService == null) return;
+            
+            if (!PlatformService.IsSteamInitialized)
+            {
+                ConsoleSystem.LogWarn("[MainMenu] Steam not initialized, cannot connect", ConsoleChannel.Network);
+                return;
+            }
+            
+            // Get the party leader (who is the host)
+            var currentParty = partyService.GetCurrentPlayerParty();
+            if (currentParty == null) return;
+            
+            var leaderSteamId = currentParty.LeaderPlayerId;
+            if (string.IsNullOrEmpty(leaderSteamId))
+            {
+                ConsoleSystem.LogErr("[MainMenu] Party has no leader, cannot connect", ConsoleChannel.Network);
+                return;
+            }
+            
+            // Disconnect any existing session
+            if (networkService.Mode != NetworkMode.None)
+            {
+                networkService.Disconnect();
+            }
+            
+            // Switch to Steam backend using reflection (same pattern as leader)
+            try
+            {
+                var reflectedConfig = networkService.GetType().GetField("_config", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (reflectedConfig != null)
+                {
+                    var config = reflectedConfig.GetValue(networkService) as NetworkConfig;
+                    if (config != null && config.Backend != NetworkBackend.Steam)
+                    {
+                        config.Backend = NetworkBackend.Steam;
+                        var initMethod = networkService.GetType().GetMethod("InitializeAdapter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        initMethod?.Invoke(networkService, null);
+                        ConsoleSystem.Log("[MainMenu] Switched to Steam networking backend (client)", ConsoleChannel.Network);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ConsoleSystem.LogWarn($"[MainMenu] Failed to switch to Steam backend: {ex.Message}", ConsoleChannel.Network);
+            }
+            
+            // Connect to the host via Steam
+            ConsoleSystem.Log($"[MainMenu] Connecting to party leader {leaderSteamId} via Steam P2P", ConsoleChannel.Network);
+            networkService.ConnectToServer(leaderSteamId, 0);
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[MainMenu] Failed to connect to host: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+    
+    private void InitializeNetworkingAsLeader(PartyService partyService)
+    {
+        try
+        {
+            var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
+            if (networkService == null) return;
+            
+            // Ensure we're using Steam backend
+            if (!PlatformService.IsSteamInitialized)
+            {
+                ConsoleSystem.LogWarn("[MainMenu] Steam not initialized, using offline mode", ConsoleChannel.Network);
+                return;
+            }
+            
+            // Disconnect any existing session
+            if (networkService.Mode != NetworkMode.None)
+            {
+                networkService.Disconnect();
+            }
+            
+            // Configure to reuse the party's Steam lobby
+            var steamLobbyId = partyService.GetCurrentSteamLobbyId();
+            if (steamLobbyId != 0)
+            {
+                ConsoleSystem.Log($"[MainMenu] Reusing party Steam lobby {steamLobbyId} for networking", ConsoleChannel.Network);
+                networkService.ConfigureSteamLobbyReuse(steamLobbyId);
+            }
+            
+            // Start server (will reuse existing lobby)
+            networkService.StartServer(0);
+            ConsoleSystem.Log("[MainMenu] Started network server as party leader", ConsoleChannel.Network);
 
-		// Resolve services
-		var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
-		var lobbyService = GetNodeOrNull<LobbyService>("/root/LobbyService");
-		var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
-		if (partyService == null || lobbyService == null || networkService == null)
-		{
-			ShowErrorDialog("Multiplayer Unavailable", "Required services are missing. Please try again.");
-			return;
-		}
-
-		// Ensure LobbyService has a local player ID (align with PartyService)
-		var localPlayerId = partyService.GetLocalPlayerId();
-		if (string.IsNullOrEmpty(localPlayerId))
-		{
-			ShowErrorDialog("Multiplayer Unavailable", "Player identity not ready yet. Please wait a moment and try again.");
-			return;
-		}
-		lobbyService.SetLocalPlayerId(localPlayerId);
-
-		// Create default lobby with sensible name and settings
-		string personaName = null;
-		try { personaName = Steam.GetPersonaName(); } catch { }
-		var displayName = !string.IsNullOrWhiteSpace(personaName) ? $"{personaName}'s Lobby" : "My Lobby";
-		var settings = new LobbySettings();
-
-		// Switch NetworkService to Steam backend and start server
-		// If a party already has a Steam lobby, we'll reuse it; otherwise create a new one
-		var existingLobbyId = partyService.GetCurrentSteamLobbyId();
-		if (existingLobbyId != 0)
-		{
-			ConsoleSystem.Log($"[MainMenu] Reusing existing Steam lobby {existingLobbyId} from party", ConsoleChannel.UI);
-		}
-		else
-		{
-			ConsoleSystem.Log("[MainMenu] Starting multiplayer: creating new Steam lobby...", ConsoleChannel.UI);
-		}
-		
-		try
-		{
-			// Disconnect any existing local server connection first
-			if (networkService.Mode != NetworkMode.None)
-			{
-				ConsoleSystem.Log("[MainMenu] Disconnecting existing network session", ConsoleChannel.Network);
-				networkService.Disconnect();
-			}
-
-			// Switch to Steam networking backend
-			var reflectedConfig = networkService.GetType().GetField("_config", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-			if (reflectedConfig != null)
-			{
-				var config = reflectedConfig.GetValue(networkService) as NetworkConfig;
-				if (config != null && config.Backend != NetworkBackend.Steam)
-				{
-					config.Backend = NetworkBackend.Steam;
-					// Trigger adapter re-initialization
-					var initMethod = networkService.GetType().GetMethod("InitializeAdapter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-					initMethod?.Invoke(networkService, null);
-					ConsoleSystem.Log("[MainMenu] Switched to Steam networking backend", ConsoleChannel.Network);
-				}
-			}
-
-			// Start the Steam lobby server (only creates a new lobby if one doesn't exist)
-			var started = networkService.StartServer(0);
-			if (!started)
-			{
-				ShowErrorDialog("Multiplayer Failed", "Failed to initialize networking. Please try again.");
-				return;
-			}
-		}
-		catch (System.Exception ex)
-		{
-			ConsoleSystem.LogErr($"[MainMenu] Failed to start networking: {ex.Message}", ConsoleChannel.Network);
-			ShowErrorDialog("Multiplayer Failed", $"Failed to initialize networking: {ex.Message}");
-			return;
-		}
-
-		// Create the game lobby (this manages players and settings)
-		GameEvent.DispatchGlobal(new CreateLobbyRequestEvent(displayName, settings));
-
-		// Notify all party members to navigate to lobby via Steam lobby data
-		if (existingLobbyId != 0)
-		{
+			// Broadcast game launch to party via Steam lobby data and start the game locally
 			try
 			{
-				Steam.SetLobbyData(existingLobbyId, "lobby_leader_id", localPlayerId);
-				Steam.SetLobbyData(existingLobbyId, "navigate_to_lobby", "true");
-				ConsoleSystem.Log("[MainMenu] Sent lobby navigation message to all party members", ConsoleChannel.UI);
+				var scenePath = "res://scenes/dev/dev.tscn";
+				var localPlayerId = partyService.GetLocalPlayerId();
+				var lobbyId = partyService.GetCurrentSteamLobbyId();
+				if (lobbyId != 0 && PlatformService.IsSteamInitialized)
+				{
+					Steam.SetLobbyData(lobbyId, "game_launched", "true");
+					Steam.SetLobbyData(lobbyId, "game_scene_path", scenePath);
+					Steam.SetLobbyData(lobbyId, "game_leader", localPlayerId);
+					ConsoleSystem.Log($"[MainMenu] Set Steam lobby game_launched=true, scene={scenePath}", ConsoleChannel.Network);
+				}
+				// Server triggers scene load and RPC to clients
+				GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
+				ConsoleSystem.Log("[MainMenu] Dispatched NewGameStartedEvent for multiplayer start", ConsoleChannel.Network);
 			}
 			catch (System.Exception ex)
 			{
-				ConsoleSystem.LogWarn($"[MainMenu] Failed to send lobby navigation message: {ex.Message}", ConsoleChannel.UI);
+				ConsoleSystem.LogWarn($"[MainMenu] Failed to broadcast game start: {ex.Message}", ConsoleChannel.Network);
 			}
-		}
-
-		// Navigate to Lobby UI
-		ShowLobbyUI();
-	}
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[MainMenu] Failed to initialize networking: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+    
 
 	private void ShowErrorDialog(string title, string message)
 	{
@@ -281,7 +410,21 @@ public partial class MainMenu : Control,
 
     public void OnGameEvent(UiShowLobbyScreenEvent eventArgs)
     {
-        ShowLobbyUI();
+        // New flow: check if we're in a party and trigger the unified flow
+        var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
+        if (partyService != null)
+        {
+            var currentParty = partyService.GetCurrentPlayerParty();
+            var localPlayerId = partyService.GetLocalPlayerId();
+            bool isLeader = currentParty?.LeaderPlayerId == localPlayerId;
+            
+            if (currentParty != null && currentParty.Members.Count > 1)
+            {
+                ConsoleSystem.Log($"[MainMenu] Showing lobby screen for party member (leader: {isLeader})", ConsoleChannel.UI);
+                StartUnifiedGameFlow(isLeader);
+                return;
+            }
+        }
     }
 
     public void OnGameEvent(DisplaySettingsEvent eventArgs)
@@ -292,21 +435,20 @@ public partial class MainMenu : Control,
 
 	public void OnGameEvent(LobbyCreatedEvent eventArgs)
 	{
-		// When a lobby is created, navigate party members to the lobby screen
+		// When a lobby is created, this is handled by the Steam lobby data update callback
+		// No need to manually navigate here as the leader sends navigation messages
+		// This event is mainly for logging and debugging purposes
 		var partyService = GetNodeOrNull<PartyService>("/root/PartyService");
 		if (partyService != null)
 		{
 			var localPlayerId = partyService.GetLocalPlayerId();
-			// Only navigate if we're a party member but not the one who clicked "Multiplayer"
-			// (the leader already navigates via StartMultiplayerFlow)
-			if (localPlayerId != eventArgs.LeaderPlayerId)
+			if (localPlayerId == eventArgs.LeaderPlayerId)
 			{
-				var party = partyService.GetCurrentPlayerParty();
-				if (party != null && party.GetMember(localPlayerId) != null)
-				{
-					ConsoleSystem.Log($"[MainMenu] Party member {localPlayerId} navigating to lobby screen", ConsoleChannel.UI);
-					ShowLobbyUI();
-				}
+				ConsoleSystem.Log($"[MainMenu] Lobby created by local player {localPlayerId}", ConsoleChannel.UI);
+			}
+			else
+			{
+				ConsoleSystem.Log($"[MainMenu] Lobby created by leader {eventArgs.LeaderPlayerId}, waiting for navigation message", ConsoleChannel.UI);
 			}
 		}
 	}

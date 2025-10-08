@@ -27,7 +27,6 @@ UiService="*res://scripts/core/services/UiService.cs"
 SceneService="*res://scripts/core/services/SceneService.cs"
 PlatformService="*res://scripts/core/services/PlatformService.cs"
 SettingsService="*res://scripts/core/services/SettingsService.cs"
-LobbyService="*res://scripts/game/services/lobby/LobbyService.cs"
 PartyService="*res://scripts/game/services/party/PartyService.cs"
 VoiceChatService="*res://scripts/game/services/voice/VoiceChatService.cs"
 

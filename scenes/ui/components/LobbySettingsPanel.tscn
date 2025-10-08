@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3 uid="uid://cn4x5y6z7a8b9c0d1e2f"]
+
+[ext_resource type="Script" path="res://scripts/ui/components/LobbySettingsPanel.cs" id="1"]
+
+[node name="LobbySettingsPanel" type="PanelContainer"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -150.0
+offset_right = 200.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+

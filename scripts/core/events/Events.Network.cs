@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Waterjam.Core.Services;
+using Waterjam.Domain.Chat;
 
 namespace Waterjam.Events;
 
@@ -32,56 +33,3 @@ public record NetworkEntitySpawnedEvent(ulong EntityId, string EntityType, Godot
 public record NetworkEntityDespawnedEvent(ulong EntityId) : IGameEvent;
 
 public record NetworkEntityStateUpdateEvent(ulong EntityId, Dictionary<string, object> ComponentData) : IGameEvent;
-
-// Mod sync events
-
-public record NetworkModSyncRequestEvent(long ClientId, List<ModInfo> ClientMods) : IGameEvent;
-
-public record NetworkModSyncResponseEvent(
-    List<ModRequirement> RequiredMods,
-    List<string> OptionalMods,
-    List<string> ForbiddenPermissions
-) : IGameEvent;
-
-/// <summary>
-/// Mod information from client
-/// </summary>
-public struct ModInfo
-{
-    public string Id;
-    public string Version;
-    public string Checksum;
-}
-
-/// <summary>
-/// Server requirement for a mod
-/// </summary>
-public struct ModRequirement
-{
-    public string Id;
-    public string Version;
-    public string Checksum;
-    public ModSide Side;
-
-    // Pass 3: Repository support
-    public string DownloadUrl;
-    public ulong SizeBytes;
-    public string RepositoryType; // "steam", "github", "modio", "http"
-    public string RepositoryId; // Workshop ID, repo name, etc.
-    public System.Collections.Generic.Dictionary<string, string> Metadata;
-
-    public byte[] ToByteArray()
-    {
-        return System.Text.Encoding.UTF8.GetBytes(Checksum ?? string.Empty);
-    }
-}
-
-/// <summary>
-/// Where a mod runs
-/// </summary>
-public enum ModSide
-{
-    Client = 0,
-    Server = 1,
-    Both = 2
-}

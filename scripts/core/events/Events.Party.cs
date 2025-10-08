@@ -1,5 +1,4 @@
 using Waterjam.Domain.Party;
-using Waterjam.Domain.Lobby;
 using Waterjam.Domain.Chat;
 using Waterjam.Game.Services.Voice;
 
@@ -51,19 +50,18 @@ public record LobbyJoinedEvent(string LobbyId, string PlayerId) : IGameEvent;
 
 public record LobbyLeftEvent(string LobbyId, string PlayerId) : IGameEvent;
 
-public record LobbyPlayerJoinedEvent(string LobbyId, LobbyPlayer Player) : IGameEvent;
+public record PartyPlayerJoinedEvent(string PartyId, PartyMember Player) : IGameEvent;
 
-public record LobbyPlayerLeftEvent(string LobbyId, string PlayerId) : IGameEvent;
+public record PartyPlayerLeftEvent(string PartyId, string PlayerId) : IGameEvent;
 
-public record LobbyLeaderChangedEvent(string LobbyId, string NewLeaderPlayerId) : IGameEvent;
+public record PartySettingsChangedEvent(string PartyId, PartySettings NewSettings) : IGameEvent;
 
-public record LobbySettingsChangedEvent(string LobbyId, LobbySettings NewSettings) : IGameEvent;
+public record PartyStartedEvent(string PartyId) : IGameEvent;
 
-public record LobbyStartedEvent(string LobbyId) : IGameEvent;
+public record PartyEndedEvent(string PartyId) : IGameEvent;
 
-public record LobbyEndedEvent(string LobbyId) : IGameEvent;
 
-public record LobbyPlayerReadyChangedEvent(string LobbyId, string PlayerId, bool IsReady) : IGameEvent;
+public record PartyPlayerReadyChangedEvent(string PartyId, string PlayerId, bool IsReady) : IGameEvent;
 
 // Progression Events
 public record ProgressionLoadedEvent(string PlayerId) : IGameEvent;
@@ -83,15 +81,13 @@ public record InviteToPartyRequestEvent(string PlayerId, string Message = null) 
 
 public record RespondToPartyInviteRequestEvent(string InviteId, bool Accept) : IGameEvent;
 
-public record CreateLobbyRequestEvent(string DisplayName, LobbySettings Settings = null) : IGameEvent;
+public record CreateLobbyRequestEvent(string DisplayName, PartySettings Settings = null) : IGameEvent;
 
 public record JoinLobbyRequestEvent(string LobbyId) : IGameEvent;
 
-public record LeaveLobbyRequestEvent() : IGameEvent;
+public record ChangePartyLeaderRequestEvent(string NewLeaderPlayerId) : IGameEvent;
 
-public record ChangeLobbyLeaderRequestEvent(string NewLeaderPlayerId) : IGameEvent;
-
-public record UpdateLobbySettingsRequestEvent(LobbySettings NewSettings) : IGameEvent;
+public record UpdatePartySettingsRequestEvent(PartySettings NewSettings) : IGameEvent;
 
 public record StartGameRequestEvent() : IGameEvent;
 
