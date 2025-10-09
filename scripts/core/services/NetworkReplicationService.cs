@@ -18,6 +18,7 @@ namespace Waterjam.Core.Services;
 public partial class NetworkReplicationService : BaseService,
     IGameEventHandler<NetworkServerTickEvent>,
     IGameEventHandler<NetworkClientConnectedEvent>,
+    IGameEventHandler<NetworkClientDisconnectedEvent>,
     IGameEventHandler<NetworkConnectedToServerEvent>
 {
     private NetworkService _networkService;
@@ -296,8 +297,26 @@ public partial class NetworkReplicationService : BaseService,
         _ticksSinceSnapshot = 0;
 
         // Send snapshots to each connected client
-        foreach (var (clientId, _) in _clientSubscriptions)
+        foreach (var (clientId, _) in _clientSubscriptions.ToArray())
         {
+            // Skip invalid/disconnected peers
+            if (clientId == 0)
+            {
+                _clientSubscriptions.Remove(clientId);
+                continue;
+            }
+            try
+            {
+                var mp = GetTree()?.GetMultiplayer();
+                var peerConnected = mp != null && mp.GetPeers().Contains((int)clientId);
+                if (!peerConnected)
+                {
+                    _clientSubscriptions.Remove(clientId);
+                    continue;
+                }
+            }
+            catch { }
+
             SendSnapshotToClient(clientId, evt.Tick);
         }
 
@@ -378,7 +397,19 @@ public partial class NetworkReplicationService : BaseService,
         // Send via RPC if we have a network peer
         if (_networkService.IsServer && _networkService.Mode == NetworkMode.Server)
         {
-            RpcId((int)clientId, nameof(ReceiveSnapshotRpc), bytes);
+            try
+            {
+                var mp = GetTree()?.GetMultiplayer();
+                if (mp != null)
+                {
+                    var peers = mp.GetPeers();
+                    if (peers.Contains((int)clientId))
+                    {
+                        RpcId((int)clientId, nameof(ReceiveSnapshotRpc), bytes);
+                    }
+                }
+            }
+            catch {}
         }
         else if (_networkService.Mode == NetworkMode.LocalServer)
         {

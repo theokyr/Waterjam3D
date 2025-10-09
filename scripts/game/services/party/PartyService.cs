@@ -83,10 +83,14 @@ public partial class PartyService : BaseService,
             }
 
             var currentPeer = mpApi.MultiplayerPeer;
-            if (currentPeer != null && currentPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+            if (currentPeer != null)
             {
-                // Already connected
-                return;
+                var status = currentPeer.GetConnectionStatus();
+                if (status == MultiplayerPeer.ConnectionStatus.Connected || status == MultiplayerPeer.ConnectionStatus.Connecting)
+                {
+                    // Already connected or in-flight; don't create another peer
+                    return;
+                }
             }
 
             var inst = ClassDB.Instantiate("SteamMultiplayerPeer");

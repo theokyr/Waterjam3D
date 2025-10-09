@@ -16,6 +16,12 @@ public partial class PlayerEntity : CharacterEntity
     [Export]
     public PlayerParams Params { get; set; }
 
+    // Owner peer ID determines which client locally controls this player.
+    // For server-authoritative networking, authority may still be 1 on clients,
+    // so we cannot rely on authority to decide local control.
+    [Export]
+    public long OwnerPeerId { get; set; } = 0;
+
     private Vector3 velocity;
     private float yawDegrees;
     private float pitchDegrees;
@@ -37,26 +43,23 @@ public partial class PlayerEntity : CharacterEntity
             ConsoleSystem.LogErr("PlayerEntity requires a CharacterBody3D child.", ConsoleChannel.Error);
         }
 
-        // Check if this is a networked player
+        // Determine local vs remote control using OwnerPeerId compared to local unique ID.
+        // Do not rely on authority when using server-authoritative movement.
         try
         {
             _networkAuthority = GetMultiplayerAuthority();
             var multiplayer = GetTree()?.GetMultiplayer();
-            if (multiplayer != null && multiplayer.MultiplayerPeer != null)
-            {
-                _isNetworked = _networkAuthority != multiplayer.GetUniqueId();
-            }
-            else
-            {
-                // No multiplayer peer set up, this is a local player
-                _isNetworked = false;
-            }
+            var hasPeer = multiplayer != null && multiplayer.MultiplayerPeer != null;
+            var localId = hasPeer ? multiplayer.GetUniqueId() : 1;
+            if (OwnerPeerId == 0) OwnerPeerId = localId; // default to local if not set yet
+            _isNetworked = OwnerPeerId != localId;
         }
         catch (System.Exception ex)
         {
             ConsoleSystem.Log($"[PlayerEntity] No multiplayer peer active, treating as local player: {ex.Message}", ConsoleChannel.Debug);
             _isNetworked = false;
             _networkAuthority = 1;
+            if (OwnerPeerId == 0) OwnerPeerId = 1;
         }
 
         // Only capture mouse for local player
@@ -71,6 +74,13 @@ public partial class PlayerEntity : CharacterEntity
         var springArmInit = CharacterBody?.GetNodeOrNull<Node3D>("SpringArm3D");
         if (springArmInit != null)
             pitchDegrees = springArmInit.RotationDegrees.X;
+
+        // Ensure only local player's camera is active
+        var camera = CharacterBody?.GetNodeOrNull<Camera3D>("SpringArm3D/Camera3D");
+        if (camera != null)
+        {
+            camera.Current = !_isNetworked;
+        }
     }
 
     public override void _PhysicsProcess(double delta)

@@ -79,13 +79,11 @@ public partial class NetworkService : BaseService,
 
         InitializeAdapter();
 
-        // Register Steam lobby callbacks for P2P flow (playbook-aligned)
+        // Register Steam callbacks used for lobby listing (party manages creation/join)
         try
         {
             if (ClassDB.ClassExists("Steam") && ClassDB.CanInstantiate("Steam"))
             {
-                Steam.LobbyCreated += OnSteamLobbyCreated;
-                Steam.LobbyJoined += OnSteamLobbyJoined;
                 Steam.LobbyMatchList += OnSteamLobbyMatchList;
             }
         }
@@ -149,7 +147,7 @@ public partial class NetworkService : BaseService,
     private int _nextSpawnIndex;
 
     /// <summary>
-    /// Host: create a Steam lobby, then create a SteamMultiplayerPeer host on lobby_created.
+    /// Host on the existing party Steam lobby; does not create lobbies.
     /// </summary>
     public bool HostSteamLobby(int maxPlayers)
     {
@@ -165,18 +163,17 @@ public partial class NetworkService : BaseService,
             return false;
         }
 
-        try
+        // Use existing party lobby managed by PartyService
+        var partyService = GetNodeOrNull<Waterjam.Game.Services.Party.PartyService>("/root/PartyService");
+        var lobbyId = partyService?.GetCurrentSteamLobbyId() ?? 0;
+        if (lobbyId == 0)
         {
-            _pendingHostLobbyCreation = true;
-            Steam.CreateLobby(Steam.LobbyType.FriendsOnly, Math.Max(2, maxPlayers));
-            ConsoleSystem.Log("[NetworkService] Creating Steam lobby (P2P host)", ConsoleChannel.Network);
-            return true;
-        }
-        catch (System.Exception ex)
-        {
-            ConsoleSystem.LogErr($"[NetworkService] Failed to create Steam lobby: {ex.Message}", ConsoleChannel.Network);
+            ConsoleSystem.LogErr("[NetworkService] No existing Steam lobby from PartyService; cannot host. Create party lobby first.", ConsoleChannel.Network);
             return false;
         }
+
+        _steamLobbyId = lobbyId;
+        return HostOnExistingLobby(lobbyId);
     }
 
     /// <summary>
@@ -234,116 +231,14 @@ public partial class NetworkService : BaseService,
             return;
         }
 
+        // PartyService owns lobby creation; NetworkService will host when requested.
         _steamLobbyId = lobbyId;
-        try
-        {
-            Steam.SetLobbyData(lobbyId, "name", STEAM_LOBBY_NAME);
-        }
-        catch {}
-
-        if (!_pendingHostLobbyCreation)
-        {
-            ConsoleSystem.Log("[NetworkService] Ignoring lobby_created (not from HostSteamLobby)", ConsoleChannel.Network);
-            return;
-        }
-        _pendingHostLobbyCreation = false;
-
-        try
-        {
-            // Create host peer and attach immediately
-            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
-            var obj = (GodotObject)inst;
-            if (obj is MultiplayerPeer mp)
-            {
-                var createErr = obj.Call("create_host");
-                long err = 0;
-                try { err = (long)createErr; } catch { err = 0; }
-                if (err == 0)
-                {
-                    AttachServerPeer(mp);
-                    ConsoleSystem.Log($"[NetworkService] Steam P2P host ready; lobby={lobbyId}", ConsoleChannel.Network);
-                }
-                else
-                {
-                    ConsoleSystem.LogErr($"[NetworkService] create_host failed: {err}", ConsoleChannel.Network);
-                }
-            }
-            else
-            {
-                ConsoleSystem.LogErr("[NetworkService] Could not instantiate SteamMultiplayerPeer for host", ConsoleChannel.Network);
-            }
-        }
-        catch (System.Exception ex)
-        {
-            ConsoleSystem.LogErr($"[NetworkService] Exception creating host: {ex.Message}", ConsoleChannel.Network);
-        }
     }
 
     private void OnSteamLobbyJoined(ulong lobbyId, long permissions, bool locked, long response)
     {
-        ConsoleSystem.Log($"[NetworkService] Lobby joined: {lobbyId}, response={response}, locked={locked}", ConsoleChannel.Network);
-        if (response != 1) return;
-
+        // PartyService owns client lobby join and will ensure client peer; no-op here
         _steamLobbyId = lobbyId;
-
-        // Determine host
-        ulong hostSteamId = 0;
-        try { hostSteamId = Steam.GetLobbyOwner(lobbyId); } catch {}
-        ulong localId = 0;
-        try { localId = Steam.GetSteamID(); } catch {}
-
-        if (hostSteamId == 0)
-        {
-            ConsoleSystem.LogWarn("[NetworkService] Host SteamID unknown on lobby join", ConsoleChannel.Network);
-            return;
-        }
-
-        // If we are host, we already created host on lobby_created
-        if (hostSteamId == localId)
-        {
-            ConsoleSystem.Log("[NetworkService] We are lobby host (Steam)", ConsoleChannel.Network);
-            return;
-        }
-
-        // Create client peer to host
-        try
-        {
-            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
-            var obj = (GodotObject)inst;
-            if (obj is MultiplayerPeer mp)
-            {
-                var createErr = obj.Call("create_client", hostSteamId);
-                long err = 0;
-                try { err = (long)createErr; } catch { err = 0; }
-                if (err == 0)
-                {
-                    AttachClientPeer(mp);
-                    ConsoleSystem.Log($"[NetworkService] Steam P2P client connected to host {hostSteamId}", ConsoleChannel.Network);
-
-                    // Late join handling: if host already launched a game, load the scene now
-                    try
-                    {
-                        var launched = Steam.GetLobbyData(lobbyId, "game_launched");
-                        var scenePath = Steam.GetLobbyData(lobbyId, "game_scene_path");
-                        if (!string.IsNullOrEmpty(launched) && launched == "true")
-                        {
-                            if (string.IsNullOrEmpty(scenePath)) scenePath = "res://scenes/dev/dev.tscn";
-                            ConsoleSystem.Log($"[NetworkService] Detected launched game on join; loading {scenePath}", ConsoleChannel.Network);
-                            GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
-                        }
-                    }
-                    catch {}
-                }
-                else
-                {
-                    ConsoleSystem.LogErr($"[NetworkService] create_client failed: {err}", ConsoleChannel.Network);
-                }
-            }
-        }
-        catch (System.Exception ex)
-        {
-            ConsoleSystem.LogErr($"[NetworkService] Exception creating client: {ex.Message}", ConsoleChannel.Network);
-        }
     }
 
     private void OnSteamLobbyMatchList(Godot.Collections.Array lobbies)
@@ -386,6 +281,90 @@ public partial class NetworkService : BaseService,
         mp.ServerDisconnected += OnServerDisconnected;
 
         ConsoleSystem.Log("[NetworkService] Connecting as client (Steam P2P)", ConsoleChannel.Network);
+    }
+
+    /// <summary>
+    /// Create and attach a SteamMultiplayerPeer host on an existing Steam lobby.
+    /// </summary>
+    public bool HostOnExistingLobby(ulong lobbyId)
+    {
+        try
+        {
+            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
+            var obj = (GodotObject)inst;
+            if (obj is MultiplayerPeer mp)
+            {
+                var createErr = obj.Call("create_host");
+                long err = 0;
+                try { err = (long)createErr; } catch { err = 0; }
+                if (err == 0)
+                {
+                    AttachServerPeer(mp);
+                    ConsoleSystem.Log($"[NetworkService] Steam P2P host ready on existing lobby {lobbyId}", ConsoleChannel.Network);
+                    _steamLobbyId = lobbyId;
+                    return true;
+                }
+                else
+                {
+                    ConsoleSystem.LogErr($"[NetworkService] create_host failed: {err}", ConsoleChannel.Network);
+                    return false;
+                }
+            }
+            else
+            {
+                ConsoleSystem.LogErr("[NetworkService] Could not instantiate SteamMultiplayerPeer for host", ConsoleChannel.Network);
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Exception creating host on existing lobby: {ex.Message}", ConsoleChannel.Network);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Ensure a Steam client peer is connected to the given host. No-ops if already connected/connecting.
+    /// </summary>
+    public void EnsureSteamClientConnectedToHost(ulong hostSteamId)
+    {
+        try
+        {
+            var mp = GetTree()?.GetMultiplayer();
+            if (mp == null) return;
+
+            var currentPeer = mp.MultiplayerPeer;
+            if (currentPeer != null)
+            {
+                var status = currentPeer.GetConnectionStatus();
+                if (status == MultiplayerPeer.ConnectionStatus.Connected || status == MultiplayerPeer.ConnectionStatus.Connecting)
+                {
+                    return;
+                }
+            }
+
+            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
+            var obj = (GodotObject)inst;
+            if (obj is MultiplayerPeer newPeer)
+            {
+                var createErr = obj.Call("create_client", hostSteamId);
+                long err = 0;
+                try { err = (long)createErr; } catch { err = 0; }
+                if (err == 0)
+                {
+                    AttachClientPeer(newPeer);
+                    ConsoleSystem.Log($"[NetworkService] Steam P2P client connected to host {hostSteamId}", ConsoleChannel.Network);
+                }
+                else
+                {
+                    ConsoleSystem.LogErr($"[NetworkService] create_client failed: {err}", ConsoleChannel.Network);
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] EnsureSteamClientConnectedToHost failed: {ex.Message}", ConsoleChannel.Network);
+        }
     }
 
     #endregion
@@ -672,6 +651,11 @@ public partial class NetworkService : BaseService,
 
     private void OnPeerConnected(long peerId)
     {
+        if (peerId <= 0)
+        {
+            ConsoleSystem.Log($"[NetworkService] Ignoring peer connected with invalid ID {peerId}", ConsoleChannel.Network);
+            return;
+        }
         if (!_inGameplayScene)
         {
             ConsoleSystem.Log($"[NetworkService] Peer connected in non-gameplay scene; delaying spawn for {peerId}", ConsoleChannel.Network);
@@ -701,6 +685,12 @@ public partial class NetworkService : BaseService,
 
     private void OnPeerDisconnected(long peerId)
     {
+        if (peerId <= 0)
+        {
+            ConsoleSystem.Log($"[NetworkService] Ignoring peer disconnected with invalid ID {peerId}", ConsoleChannel.Network);
+            return;
+        }
+
         ConsoleSystem.Log($"[NetworkService] Peer disconnected: {peerId}", ConsoleChannel.Network);
 
         // Remove the player entity
@@ -823,6 +813,7 @@ public partial class NetworkService : BaseService,
 
             // Set player properties
             playerInstance.Name = $"Player_{peerId}";
+            playerInstance.OwnerPeerId = peerId;
             
             // Set network authority BEFORE adding to tree
             try
@@ -1068,6 +1059,7 @@ public partial class NetworkService : BaseService,
             var playerScene = GD.Load<PackedScene>("res://scenes/Player.tscn");
             var playerInstance = playerScene.Instantiate<PlayerEntity>();
             playerInstance.Name = playerName ?? $"Player_{peerId}";
+            playerInstance.OwnerPeerId = peerId;
             try
             {
                 // Server-authoritative on clients
@@ -1436,8 +1428,8 @@ public partial class NetworkService : BaseService,
                 var pid = (long)peerIds[i];
                 if (_networkedPlayers.TryGetValue(pid, out var player))
                 {
-                    // Do not override local authoritative player on client
-                    if (player.GetMultiplayerAuthority() == localId) continue;
+                    // Do not override local player on client; base on OwnerPeerId not authority
+                    if (player.OwnerPeerId == localId) continue;
                     player.GlobalPosition = positions[i];
                 }
             }
