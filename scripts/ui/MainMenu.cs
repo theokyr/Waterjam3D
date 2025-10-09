@@ -215,6 +215,17 @@ public partial class MainMenu : Control,
             
             // Multiplayer flow - show lobby settings panel
             ConsoleSystem.Log($"[MainMenu] Multiplayer flow - party has {currentParty.Members.Count} members, leader: {isLeader}", ConsoleChannel.UI);
+
+            // Disable New Game button for non-leader peers
+            try
+            {
+                var newGameButton = _menuButtons.GetNodeOrNull<Button>("NewGameButton");
+                if (newGameButton != null)
+                {
+                    newGameButton.Disabled = !isLeader;
+                }
+            }
+            catch { }
             
                 
             // Initialize networking
@@ -256,56 +267,11 @@ public partial class MainMenu : Control,
     {
         try
         {
+            // Show lobby UI and list available Steam lobbies per playbook
+            ShowMultiplayerUI();
             var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
-            if (networkService == null) return;
-            
-            if (!PlatformService.IsSteamInitialized)
-            {
-                ConsoleSystem.LogWarn("[MainMenu] Steam not initialized, cannot connect", ConsoleChannel.Network);
-                return;
-            }
-            
-            // Get the party leader (who is the host)
-            var currentParty = partyService.GetCurrentPlayerParty();
-            if (currentParty == null) return;
-            
-            var leaderSteamId = currentParty.LeaderPlayerId;
-            if (string.IsNullOrEmpty(leaderSteamId))
-            {
-                ConsoleSystem.LogErr("[MainMenu] Party has no leader, cannot connect", ConsoleChannel.Network);
-                return;
-            }
-            
-            // Disconnect any existing session
-            if (networkService.Mode != NetworkMode.None)
-            {
-                networkService.Disconnect();
-            }
-            
-            // Switch to Steam backend using reflection (same pattern as leader)
-            try
-            {
-                var reflectedConfig = networkService.GetType().GetField("_config", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (reflectedConfig != null)
-                {
-                    var config = reflectedConfig.GetValue(networkService) as NetworkConfig;
-                    if (config != null && config.Backend != NetworkBackend.Steam)
-                    {
-                        config.Backend = NetworkBackend.Steam;
-                        var initMethod = networkService.GetType().GetMethod("InitializeAdapter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        initMethod?.Invoke(networkService, null);
-                        ConsoleSystem.Log("[MainMenu] Switched to Steam networking backend (client)", ConsoleChannel.Network);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                ConsoleSystem.LogWarn($"[MainMenu] Failed to switch to Steam backend: {ex.Message}", ConsoleChannel.Network);
-            }
-            
-            // Connect to the host via Steam
-            ConsoleSystem.Log($"[MainMenu] Connecting to party leader {leaderSteamId} via Steam P2P", ConsoleChannel.Network);
-            networkService.ConnectToServer(leaderSteamId, 0);
+            networkService?.ListSteamLobbies();
+            ConsoleSystem.Log("[MainMenu] Listing Steam lobbies for join (client flow)", ConsoleChannel.Network);
         }
         catch (Exception ex)
         {
@@ -327,45 +293,41 @@ public partial class MainMenu : Control,
                 return;
             }
             
-            // Disconnect any existing session
-            if (networkService.Mode != NetworkMode.None)
+            // Host if not already networked, otherwise proceed to launch
+            if (networkService.Mode == NetworkMode.None)
             {
-                networkService.Disconnect();
+                var ok = networkService.HostSteamLobby(8);
+                if (ok)
+                {
+                    ConsoleSystem.Log("[MainMenu] Hosting Steam lobby (multiplayer)", ConsoleChannel.Network);
+                }
+                else
+                {
+                    ConsoleSystem.LogErr("[MainMenu] Failed to host Steam lobby", ConsoleChannel.Network);
+                }
             }
-            
-            // Configure to reuse the party's Steam lobby
-            var steamLobbyId = partyService.GetCurrentSteamLobbyId();
-            if (steamLobbyId != 0)
-            {
-                ConsoleSystem.Log($"[MainMenu] Reusing party Steam lobby {steamLobbyId} for networking", ConsoleChannel.Network);
-                networkService.ConfigureSteamLobbyReuse(steamLobbyId);
-            }
-            
-            // Start server (will reuse existing lobby)
-            networkService.StartServer(0);
-            ConsoleSystem.Log("[MainMenu] Started network server as party leader", ConsoleChannel.Network);
 
-			// Broadcast game launch to party via Steam lobby data and start the game locally
-			try
-			{
-				var scenePath = "res://scenes/dev/dev.tscn";
-				var localPlayerId = partyService.GetLocalPlayerId();
-				var lobbyId = partyService.GetCurrentSteamLobbyId();
-				if (lobbyId != 0 && PlatformService.IsSteamInitialized)
-				{
-					Steam.SetLobbyData(lobbyId, "game_launched", "true");
-					Steam.SetLobbyData(lobbyId, "game_scene_path", scenePath);
-					Steam.SetLobbyData(lobbyId, "game_leader", localPlayerId);
-					ConsoleSystem.Log($"[MainMenu] Set Steam lobby game_launched=true, scene={scenePath}", ConsoleChannel.Network);
-				}
-				// Server triggers scene load and RPC to clients
-				GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
-				ConsoleSystem.Log("[MainMenu] Dispatched NewGameStartedEvent for multiplayer start", ConsoleChannel.Network);
-			}
-			catch (System.Exception ex)
-			{
-				ConsoleSystem.LogWarn($"[MainMenu] Failed to broadcast game start: {ex.Message}", ConsoleChannel.Network);
-			}
+            // Immediately start the multiplayer game for all party members
+            try
+            {
+                var scenePath = "res://scenes/dev/dev.tscn";
+                var localPlayerId = partyService.GetLocalPlayerId();
+                var lobbyId = partyService.GetCurrentSteamLobbyId();
+                if (lobbyId != 0 && PlatformService.IsSteamInitialized)
+                {
+                    // Optional metadata to help late joiners
+                    Steam.SetLobbyData(lobbyId, "game_launched", "true");
+                    Steam.SetLobbyData(lobbyId, "game_scene_path", scenePath);
+                    Steam.SetLobbyData(lobbyId, "game_leader", localPlayerId);
+                }
+
+                GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
+                ConsoleSystem.Log("[MainMenu] Multiplayer start dispatched (dev map)", ConsoleChannel.Network);
+            }
+            catch (System.Exception ex)
+            {
+                ConsoleSystem.LogWarn($"[MainMenu] Failed to dispatch start: {ex.Message}", ConsoleChannel.Network);
+            }
         }
         catch (Exception ex)
         {

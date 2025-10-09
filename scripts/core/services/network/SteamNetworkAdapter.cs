@@ -20,7 +20,7 @@ public class SteamNetworkAdapter : INetworkAdapter
 {
     public NetworkBackend Backend => NetworkBackend.Steam;
 
-    private SteamP2PMultiplayerPeer _peer;
+    private MultiplayerPeer _peer;
     private ulong _lobbyId;
     private ulong _hostSteamId;
     private string _lobbyJoinCode;
@@ -30,21 +30,30 @@ public class SteamNetworkAdapter : INetworkAdapter
     private ulong _preferredLobbyId; // If set, reuse this lobby instead of creating a new one
     private Dictionary<ulong, int> _steamIdToPeerId = new();
     private Dictionary<int, ulong> _peerIdToSteamId = new();
-    private int _nextPeerId = 2; // 1 is reserved for server
 
     public MultiplayerPeer Peer => _peer;
 
     public SteamNetworkAdapter()
     {
-        // Wire up Steam lobby and P2P callbacks
-        if (PlatformService.IsSteamInitialized)
+        // Wire up Steam lobby and P2P callbacks as soon as the Steam class is available
+        try
         {
-            Steam.LobbyCreated += OnLobbyCreated;
-            Steam.LobbyMatchList += OnLobbyMatchList;
-            Steam.LobbyJoined += OnLobbyJoined;
-            Steam.P2PSessionRequest += OnP2PSessionRequest;
-            Steam.P2PSessionConnectFail += OnP2PSessionConnectFail;
-            ConsoleSystem.Log("[SteamNetworkAdapter] Steam callbacks registered", ConsoleChannel.Network);
+            if (ClassDB.ClassExists("Steam") && ClassDB.CanInstantiate("Steam"))
+            {
+                Steam.LobbyCreated += OnLobbyCreated;
+                Steam.LobbyMatchList += OnLobbyMatchList;
+                Steam.LobbyJoined += OnLobbyJoined;
+                Steam.LobbyChatUpdate += OnLobbyChatUpdate;
+                ConsoleSystem.Log("[SteamNetworkAdapter] Steam callbacks registered (class available)", ConsoleChannel.Network);
+            }
+            else
+            {
+                ConsoleSystem.LogWarn("[SteamNetworkAdapter] Steam class not available; callbacks not registered", ConsoleChannel.Network);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[SteamNetworkAdapter] Failed to register Steam callbacks: {ex.Message}", ConsoleChannel.Network);
         }
     }
 
@@ -67,52 +76,47 @@ public class SteamNetworkAdapter : INetworkAdapter
 
         try
         {
-            // If a preferred lobby is set and we're its owner, reuse it instead of creating a new one
+            // If a preferred lobby is provided (party lobby), remember it for discovery purposes, but do not create/modify lobbies here
             if (_preferredLobbyId != 0)
             {
-                var owner = Steam.GetLobbyOwner(_preferredLobbyId);
-                var me = Steam.GetSteamID();
-                ConsoleSystem.Log($"[SteamNetworkAdapter] Checking preferred lobby {_preferredLobbyId}, owner: {owner}, me: {me}", ConsoleChannel.Network);
+                _lobbyId = _preferredLobbyId;
+                _preferredLobbyId = 0;
+                ConsoleSystem.Log($"[SteamNetworkAdapter] Using existing Steam lobby {_lobbyId} for discovery (no lobby creation)", ConsoleChannel.Network);
+            }
 
-                if (owner == me)
+            // Always create the host peer directly
+            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
+            GodotObject obj = (GodotObject)inst;
+            if (obj is MultiplayerPeer mp)
+            {
+                var createErr = obj.Call("create_host");
+                long err = 0;
+                try { err = (long)createErr; } catch { err = 0; }
+                if (err == 0)
                 {
+                    _peer = mp;
+                    var tree = Engine.GetMainLoop() as SceneTree;
+                    tree?.GetMultiplayer().SetMultiplayerPeer(_peer);
                     _isHost = true;
-                    _lobbyId = _preferredLobbyId;
-                    _preferredLobbyId = 0; // consume
-
-                    // Initialize peer immediately; we are the host
-                    _peer = new SteamP2PMultiplayerPeer();
-                    _peer.InitializeAsHost(Steam.GetSteamID());
-                    Steam.AllowP2PPacketRelay(true);
-
-                    // Ensure lobby data is set for game networking
-                    _lobbyJoinCode = GenerateLobbyCode();
-                    Steam.SetLobbyData(_lobbyId, "join_code", _lobbyJoinCode);
-                    Steam.SetLobbyData(_lobbyId, "name", "Game Lobby");
-
                     _isConnected = true;
-                    ConsoleSystem.Log($"[SteamNetworkAdapter] Reusing existing Steam lobby {_lobbyId} as host", ConsoleChannel.Network);
+                    ConsoleSystem.Log("[SteamNetworkAdapter] SteamMultiplayerPeer host created", ConsoleChannel.Network);
                     return true;
                 }
                 else
                 {
-                    ConsoleSystem.LogWarn($"[SteamNetworkAdapter] Preferred lobby {_preferredLobbyId} is not owned by local user (owner: {owner}, me: {me}); creating a new lobby", ConsoleChannel.Network);
-                    _preferredLobbyId = 0; // reset since we can't use it
+                    ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to create host: {err}", ConsoleChannel.Network);
+                    return false;
                 }
             }
-
-            // Create a Steam lobby - this is async, we'll handle the response in OnLobbyCreated
-            Steam.CreateLobby(Steam.LobbyType.FriendsOnly, maxPlayers);
-
-            _isHost = true;
-            _lobbyCreationPending = true;
-            ConsoleSystem.Log($"[SteamNetworkAdapter] Creating Steam lobby (max {maxPlayers} players)", ConsoleChannel.Network);
-
-            return true;
+            else
+            {
+                ConsoleSystem.LogErr("[SteamNetworkAdapter] Could not instantiate SteamMultiplayerPeer for host", ConsoleChannel.Network);
+                return false;
+            }
         }
         catch (Exception ex)
         {
-            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to create lobby: {ex.Message}", ConsoleChannel.Network);
+            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to start host: {ex.Message}", ConsoleChannel.Network);
             return false;
         }
     }
@@ -135,24 +139,12 @@ public class SteamNetworkAdapter : INetworkAdapter
             return;
         }
 
+        // We no longer create host here; StartServer handles host peer creation. Store lobby info only.
         _lobbyId = lobbyId;
         _lobbyJoinCode = GenerateLobbyCode();
-        _isConnected = true;
-
-        // Set lobby data
         Steam.SetLobbyData(lobbyId, "join_code", _lobbyJoinCode);
         Steam.SetLobbyData(lobbyId, "name", "Game Lobby");
-
-        ConsoleSystem.Log($"[SteamNetworkAdapter] Steam lobby created! ID: {lobbyId}, Join Code: {_lobbyJoinCode}", ConsoleChannel.Network);
-
-        // Initialize Steam-backed MultiplayerPeer
-        _peer = new SteamP2PMultiplayerPeer();
-        _peer.InitializeAsHost(Steam.GetSteamID());
-
-        // Allow P2P relay through Steam servers for better connectivity
-        Steam.AllowP2PPacketRelay(true);
-
-        ConsoleSystem.Log("[SteamNetworkAdapter] Steam P2P server created successfully", ConsoleChannel.Network);
+        ConsoleSystem.Log($"[SteamNetworkAdapter] Steam lobby created (discovery only). ID: {lobbyId}, Join Code: {_lobbyJoinCode}", ConsoleChannel.Network);
     }
 
     private void OnLobbyMatchList(Godot.Collections.Array lobbies)
@@ -179,7 +171,6 @@ public class SteamNetworkAdapter : INetworkAdapter
         }
 
         _lobbyId = lobbyId;
-        _isConnected = true;
 
         // Get the host's Steam ID (owner of the lobby)
         var numMembers = Steam.GetNumLobbyMembers(lobbyId);
@@ -219,68 +210,68 @@ public class SteamNetworkAdapter : INetworkAdapter
         }
         else
         {
-            // We're a client - connect to the host via Steam P2P
-            ConsoleSystem.Log($"[SteamNetworkAdapter] Connecting to host Steam ID {_hostSteamId} via Steam P2P...", ConsoleChannel.Network);
-            
-            _peer = new SteamP2PMultiplayerPeer();
-            _peer.InitializeAsClient(_hostSteamId);
-            
-            // Send initial connection packet to host
-            var connectionPacket = new byte[] { 0xFF, 0xFE }; // Magic bytes for connection request
-            Steam.SendP2PPacket(_hostSteamId, connectionPacket, Steam.P2PSend.Reliable, 0);
-            
-            ConsoleSystem.Log("[SteamNetworkAdapter] Steam P2P client created successfully", ConsoleChannel.Network);
+            // Client connection is handled by PartyService to avoid duplicate peer creation
+            ConsoleSystem.Log("[SteamNetworkAdapter] Client join detected; PartyService will manage peer creation.", ConsoleChannel.Network);
         }
     }
 
-    private void OnP2PSessionRequest(ulong steamIdRemote)
+    private void OnLobbyChatUpdate(ulong lobbyId, long changedId, long makingChangeId, long chatState)
     {
-        ConsoleSystem.Log($"[SteamNetworkAdapter] P2P session request from Steam ID: {steamIdRemote}", ConsoleChannel.Network);
-        
-        // Accept the P2P session
-        Steam.AcceptP2PSessionWithUser(steamIdRemote);
-        
-        if (_isHost)
+        // Only process events for our current lobby
+        if (lobbyId != _lobbyId) return;
+
+        var stateChange = (Steam.ChatMemberStateChange)chatState;
+        var changedSteamId = (ulong)changedId;
+        ConsoleSystem.Log($"[SteamNetworkAdapter] Lobby chat update: {stateChange} for user {changedSteamId} in lobby {lobbyId}", ConsoleChannel.Network);
+
+        try
         {
-            // Assign a peer ID to this client if we haven't already
-            if (!_steamIdToPeerId.ContainsKey(steamIdRemote))
+            // Check if this is a party lobby (has party metadata)
+            var lobbyType = Steam.GetLobbyData(lobbyId, "lobby_type");
+            var partyId = Steam.GetLobbyData(lobbyId, "party_id");
+            var isPartyLobby = lobbyType == "party" && !string.IsNullOrEmpty(partyId);
+
+            // Handle member join/leave events
+            if (stateChange.HasFlag(Steam.ChatMemberStateChange.Entered))
             {
-                int peerId = _nextPeerId++;
-                _steamIdToPeerId[steamIdRemote] = peerId;
-                _peerIdToSteamId[peerId] = steamIdRemote;
-
-                // Send peer ID assignment to the client
-                var assignmentPacket = new byte[5];
-                assignmentPacket[0] = 0xFF; // Magic byte
-                assignmentPacket[1] = 0xFD; // Peer ID assignment marker
-                BitConverter.GetBytes(peerId).CopyTo(assignmentPacket, 1);
-                Steam.SendP2PPacket(steamIdRemote, assignmentPacket, Steam.P2PSend.Reliable, 0);
-
-                ConsoleSystem.Log($"[SteamNetworkAdapter] Assigned peer ID {peerId} to Steam ID {steamIdRemote}", ConsoleChannel.Network);
-
-                // Register mapping in MultiplayerPeer and send current party state to the new peer
-                _peer?.MapPeer(peerId, steamIdRemote);
-                SendCurrentLobbyStateToPeer(steamIdRemote);
+                ConsoleSystem.Log($"[SteamNetworkAdapter] Steam user {changedSteamId} joined lobby", ConsoleChannel.Network);
+                
+                // Dispatch party event if this is a party lobby
+                if (isPartyLobby)
+                {
+                    var playerName = Steam.GetFriendPersonaName(changedSteamId);
+                    var playerId = changedSteamId.ToString();
+                    var member = new Waterjam.Domain.Party.PartyMember(playerId, false, playerName);
+                    
+                    GameEvent.DispatchGlobal(new PartyMemberJoinedEvent(partyId, member));
+                    ConsoleSystem.Log($"[SteamNetworkAdapter] Dispatched PartyMemberJoinedEvent for {playerName}", ConsoleChannel.Network);
+                }
+            }
+            else if (stateChange.HasFlag(Steam.ChatMemberStateChange.Left) || 
+                     stateChange.HasFlag(Steam.ChatMemberStateChange.Disconnected) ||
+                     stateChange.HasFlag(Steam.ChatMemberStateChange.Kicked) ||
+                     stateChange.HasFlag(Steam.ChatMemberStateChange.Banned))
+            {
+                var playerId = changedSteamId.ToString();
+                ConsoleSystem.Log($"[SteamNetworkAdapter] Steam user {changedSteamId} left lobby", ConsoleChannel.Network);
+                
+                // Dispatch party event if this is a party lobby
+                if (isPartyLobby)
+                {
+                    GameEvent.DispatchGlobal(new PartyMemberLeftEvent(partyId, playerId));
+                    ConsoleSystem.Log($"[SteamNetworkAdapter] Dispatched PartyMemberLeftEvent for {playerId}", ConsoleChannel.Network);
+                }
             }
         }
-        else
+        catch (Exception ex)
         {
-            // We're a client - request current lobby state from host
-            RequestLobbyStateFromHost();
+            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Error handling lobby chat update: {ex.Message}", ConsoleChannel.Network);
         }
     }
 
-    private void OnP2PSessionConnectFail(ulong steamIdRemote, long sessionError)
-    {
-        var errorType = (Steam.P2PSessionError)sessionError;
-        ConsoleSystem.LogErr($"[SteamNetworkAdapter] P2P session connect fail with {steamIdRemote}: {errorType}", ConsoleChannel.Network);
-        
-        if (_steamIdToPeerId.TryGetValue(steamIdRemote, out var peerId))
-        {
-            _steamIdToPeerId.Remove(steamIdRemote);
-            _peerIdToSteamId.Remove(peerId);
-        }
-    }
+    private void OnP2PSessionRequest(ulong steamIdRemote) { }
+
+    private void OnP2PSessionConnectFail(ulong steamIdRemote, long sessionError) { }
 
     public bool Connect(string address, int port)
     {
@@ -292,17 +283,8 @@ public class SteamNetworkAdapter : INetworkAdapter
 
         try
         {
-            // For Steam, we connect via lobby code or direct Steam ID
-            if (ulong.TryParse(address, out ulong steamId))
-            {
-                // Direct connection to Steam ID
-                return ConnectToSteamId(steamId);
-            }
-            else
-            {
-                // Connection via lobby code
-                return ConnectToLobby(address);
-            }
+            // Connection via lobby code; lobby join will trigger client creation
+            return ConnectToLobby(address);
         }
         catch (Exception ex)
         {
@@ -329,24 +311,7 @@ public class SteamNetworkAdapter : INetworkAdapter
         }
     }
 
-    private bool ConnectToSteamId(ulong steamId)
-    {
-        try
-        {
-            // Request P2P session with the host
-            // Send a small ping to open NAT path; channel 0
-            Steam.SendP2PPacket(steamId, new byte[1] { 0 }, GodotSteam.Steam.P2PSend.Reliable, 0);
-
-            _hostSteamId = steamId;
-            ConsoleSystem.Log($"[SteamNetworkAdapter] Requesting P2P session with Steam ID: {steamId}", ConsoleChannel.Network);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Failed to connect to Steam ID: {ex.Message}", ConsoleChannel.Network);
-            return false;
-        }
-    }
+    private bool ConnectToSteamId(ulong steamId) { return false; }
 
     public void Disconnect()
     {
@@ -358,15 +323,9 @@ public class SteamNetworkAdapter : INetworkAdapter
                 Steam.LobbyCreated -= OnLobbyCreated;
                 Steam.LobbyMatchList -= OnLobbyMatchList;
                 Steam.LobbyJoined -= OnLobbyJoined;
-                Steam.P2PSessionRequest -= OnP2PSessionRequest;
-                Steam.P2PSessionConnectFail -= OnP2PSessionConnectFail;
+                Steam.LobbyChatUpdate -= OnLobbyChatUpdate;
             }
             
-            // Close all P2P sessions
-            foreach (var steamId in _steamIdToPeerId.Keys.ToArray())
-            {
-                Steam.CloseP2PSessionWithUser(steamId);
-            }
             _steamIdToPeerId.Clear();
             _peerIdToSteamId.Clear();
 
@@ -378,7 +337,11 @@ public class SteamNetworkAdapter : INetworkAdapter
 
             if (_peer != null)
             {
-                _peer.Close();
+                var tree = Engine.GetMainLoop() as SceneTree;
+                if (tree?.GetMultiplayer() != null)
+                {
+                    tree.GetMultiplayer().MultiplayerPeer = null;
+                }
                 _peer = null;
             }
 
@@ -387,6 +350,7 @@ public class SteamNetworkAdapter : INetworkAdapter
             _hostSteamId = 0;
             _lobbyJoinCode = null;
             _lobbyCreationPending = false;
+            
 
             ConsoleSystem.Log("[SteamNetworkAdapter] Disconnected", ConsoleChannel.Network);
         }
@@ -399,92 +363,9 @@ public class SteamNetworkAdapter : INetworkAdapter
     /// <summary>
     /// Updates Steam callbacks and handles P2P packets. Should be called from NetworkService.
     /// </summary>
-    public void Update()
-    {
-        if (!PlatformService.IsSteamInitialized) return;
+    public void Update(double delta) { }
 
-        try
-        {
-            // Handle P2P packets
-            HandleP2PPackets();
-
-            // Update Steam callbacks
-            Steam.RunCallbacks();
-        }
-        catch (Exception ex)
-        {
-            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Error during update: {ex.Message}", ConsoleChannel.Network);
-        }
-    }
-
-    private void HandleP2PPackets()
-    {
-        if (!PlatformService.IsSteamInitialized || !_isConnected) return;
-
-        try
-        {
-            // Check for incoming P2P packets on channel 0
-            var packetSize = Steam.GetAvailableP2PPacketSize(0);
-            while (packetSize > 0)
-            {
-                var packetInfo = Steam.ReadP2PPacket(packetSize, 0);
-                if (packetInfo != null && packetInfo.ContainsKey("data") && packetInfo.ContainsKey("steam_id_remote"))
-                {
-                    var data = packetInfo["data"].AsByteArray();
-                    var steamIdRemote = packetInfo["steam_id_remote"].AsUInt64();
-                    
-                    // Handle special control packets
-                    if (data.Length >= 2 && data[0] == 0xFF)
-                    {
-                        if (data[1] == 0xFE) // Connection request
-                        {
-                            // Already handled by P2PSessionRequest callback
-                            ConsoleSystem.Log($"[SteamNetworkAdapter] Connection request from {steamIdRemote}", ConsoleChannel.Network);
-                        }
-                        else if (data[1] == 0xFD && !_isHost) // Peer ID assignment
-                        {
-                            int assignedPeerId = BitConverter.ToInt32(data, 1);
-                            if (assignedPeerId > 0)
-                            {
-                                ConsoleSystem.Log($"[SteamNetworkAdapter] Received peer ID assignment: {assignedPeerId}", ConsoleChannel.Network);
-                                // Store the peer ID mapping
-                                _steamIdToPeerId[steamIdRemote] = 1; // Server is always peer 1
-                                _peerIdToSteamId[1] = steamIdRemote;
-                            }
-                        }
-                        else if (data[1] == 0x01) // Lobby state packet
-                        {
-                            HandleLobbyStatePacket(data, steamIdRemote);
-                        }
-                        else if (data[1] == 0x02) // Lobby event packet (enveloped message)
-                        {
-                            HandleLobbyMessagePacket(data, steamIdRemote);
-                        }
-                        else if (data[1] == 0x03) // Lobby state request packet
-                        {
-                            HandleLobbyStateRequestPacket(data, steamIdRemote);
-                        }
-                        else
-                        {
-                            // Unknown control header - ignore
-                        }
-                    }
-                    else
-                    {
-                        // Regular game packet - feed into MultiplayerPeer for Godot RPC
-                        _peer?.EnqueueIncoming(data, steamIdRemote);
-                    }
-                }
-                
-                // Check for next packet
-                packetSize = Steam.GetAvailableP2PPacketSize(0);
-            }
-        }
-        catch (Exception ex)
-        {
-            ConsoleSystem.LogErr($"[SteamNetworkAdapter] Error handling P2P packets: {ex.Message}", ConsoleChannel.Network);
-        }
-    }
+    private void HandleP2PPackets() { }
 
     private string GenerateLobbyCode()
     {
@@ -717,10 +598,19 @@ public class SteamNetworkAdapter : INetworkAdapter
 
     /// <summary>
     /// Gets the current connection status.
+    /// For clients, this includes waiting for peer assignment.
     /// </summary>
     public bool IsConnected()
     {
-        return _isConnected;
+        if (_isHost)
+        {
+            return _isConnected;
+        }
+        else
+        {
+            // Clients are connected once the addon peer is set
+            return _isConnected;
+        }
     }
 
     /// <summary>

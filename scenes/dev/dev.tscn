@@ -1,6 +1,4 @@
-[gd_scene load_steps=6 format=3 uid="uid://g74owxu4shn2"]
-
-[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="1_x2s3y"]
+[gd_scene load_steps=5 format=3 uid="uid://g74owxu4shn2"]
 
 [sub_resource type="BoxMesh" id="ground_mesh"]
 size = Vector3(40, 1, 40)

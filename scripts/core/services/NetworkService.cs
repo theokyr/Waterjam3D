@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.Linq;
 using System.Threading.Tasks;
 using Godot;
@@ -30,6 +31,7 @@ public partial class NetworkService : BaseService,
 
     // Server state
     private readonly Dictionary<long, ClientState> _connectedClients = new();
+    private readonly Dictionary<long, Queue<InputPacket>> _serverInputQueues = new();
     private ulong _currentTick;
     private double _tickAccumulator;
     private const double TICK_RATE = 30.0; // 30 Hz simulation
@@ -49,7 +51,22 @@ public partial class NetworkService : BaseService,
 
     public bool IsServer => _mode == NetworkMode.Server || _mode == NetworkMode.LocalServer;
     public bool IsClient => _mode == NetworkMode.Client || _mode == NetworkMode.LocalServer;
-    public new bool IsConnected => _adapter != null && _adapter.Peer != null && _adapter.Peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+    public new bool IsConnected
+    {
+        get
+        {
+            try
+            {
+                var mp = GetTree()?.GetMultiplayer();
+                if (mp?.MultiplayerPeer != null)
+                {
+                    return mp.MultiplayerPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+                }
+            }
+            catch { }
+            return _adapter != null && _adapter.Peer != null && _adapter.Peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+        }
+    }
     public NetworkBackend CurrentBackend => _config.Backend;
     public NetworkMode Mode => _mode;
     public ulong CurrentTick => _currentTick;
@@ -62,6 +79,18 @@ public partial class NetworkService : BaseService,
 
         InitializeAdapter();
 
+        // Register Steam lobby callbacks for P2P flow (playbook-aligned)
+        try
+        {
+            if (ClassDB.ClassExists("Steam") && ClassDB.CanInstantiate("Steam"))
+            {
+                Steam.LobbyCreated += OnSteamLobbyCreated;
+                Steam.LobbyJoined += OnSteamLobbyJoined;
+                Steam.LobbyMatchList += OnSteamLobbyMatchList;
+            }
+        }
+        catch {}
+
         // Register console commands
         RegisterConsoleCommands();
 
@@ -70,11 +99,34 @@ public partial class NetworkService : BaseService,
 
     public override void _Process(double delta)
     {
-        // Update Steam adapter if it's the current backend
-        if (_adapter is SteamNetworkAdapter steamAdapter)
+        // Detect client connection established by addon peer; set client mode conservatively
+        try
         {
-            steamAdapter.Update();
+            if (_mode == NetworkMode.None)
+            {
+                var mp = GetTree()?.GetMultiplayer();
+                var peer = mp?.MultiplayerPeer;
+                if (peer != null && peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+                {
+                    // Only treat as client once a non-server unique ID is assigned
+                    var uid = mp.GetUniqueId();
+                    var isServerRole = mp.IsServer();
+                    if (!isServerRole && uid != 1)
+                    {
+                        _mode = NetworkMode.Client;
+                        _clientId = uid;
+                        ConsoleSystem.Log($"[NetworkService] Detected connected client peer; entering Client mode (client ID: {_clientId})", ConsoleChannel.Network);
+                        GameEvent.DispatchGlobal(new NetworkConnectedToServerEvent(_clientId));
+                    }
+                }
+            }
         }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[NetworkService] Client detection in _Process failed: {ex.Message}", ConsoleChannel.Network);
+        }
+
+        // Steam addon peer manages its own networking; only run server tick here
 
         if (!IsServer) return;
 
@@ -87,6 +139,257 @@ public partial class NetworkService : BaseService,
         }
     }
 
+    #region Steam P2P (Playbook Flow)
+
+    private const string STEAM_LOBBY_NAME = "Waterjam3D";
+    private ulong _steamLobbyId;
+    private bool _pendingHostLobbyCreation;
+    private bool _inGameplayScene;
+    private readonly System.Collections.Generic.Dictionary<long, int> _peerIdToSpawnIndex = new();
+    private int _nextSpawnIndex;
+
+    /// <summary>
+    /// Host: create a Steam lobby, then create a SteamMultiplayerPeer host on lobby_created.
+    /// </summary>
+    public bool HostSteamLobby(int maxPlayers)
+    {
+        if (_mode != NetworkMode.None)
+        {
+            ConsoleSystem.LogErr("[NetworkService] Already in network mode; disconnect first", ConsoleChannel.Network);
+            return false;
+        }
+
+        if (!PlatformService.IsSteamInitialized || !ClassDB.ClassExists("Steam") || !ClassDB.CanInstantiate("Steam"))
+        {
+            ConsoleSystem.LogErr("[NetworkService] Steam not initialized; cannot host Steam P2P", ConsoleChannel.Network);
+            return false;
+        }
+
+        try
+        {
+            _pendingHostLobbyCreation = true;
+            Steam.CreateLobby(Steam.LobbyType.FriendsOnly, Math.Max(2, maxPlayers));
+            ConsoleSystem.Log("[NetworkService] Creating Steam lobby (P2P host)", ConsoleChannel.Network);
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Failed to create Steam lobby: {ex.Message}", ConsoleChannel.Network);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Client: list lobbies filtered by name and let UI choose one.
+    /// </summary>
+    public void ListSteamLobbies()
+    {
+        if (!PlatformService.IsSteamInitialized || !ClassDB.ClassExists("Steam") || !ClassDB.CanInstantiate("Steam"))
+        {
+            ConsoleSystem.LogErr("[NetworkService] Steam not initialized; cannot list lobbies", ConsoleChannel.Network);
+            return;
+        }
+
+        try
+        {
+            Steam.AddRequestLobbyListStringFilter("name", STEAM_LOBBY_NAME, Steam.LobbyComparison.LobbyComparisonEqual);
+            Steam.RequestLobbyList();
+            ConsoleSystem.Log($"[NetworkService] Requested Steam lobby list for name='{STEAM_LOBBY_NAME}'", ConsoleChannel.Network);
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Failed to request lobby list: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    /// <summary>
+    /// Client: join a lobby by ID.
+    /// </summary>
+    public bool JoinSteamLobby(ulong lobbyId)
+    {
+        if (!PlatformService.IsSteamInitialized || !ClassDB.ClassExists("Steam") || !ClassDB.CanInstantiate("Steam"))
+        {
+            ConsoleSystem.LogErr("[NetworkService] Steam not initialized; cannot join lobby", ConsoleChannel.Network);
+            return false;
+        }
+
+        try
+        {
+            Steam.JoinLobby(lobbyId);
+            ConsoleSystem.Log($"[NetworkService] Joining Steam lobby {lobbyId}", ConsoleChannel.Network);
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Failed to join lobby: {ex.Message}", ConsoleChannel.Network);
+            return false;
+        }
+    }
+
+    private void OnSteamLobbyCreated(long result, ulong lobbyId)
+    {
+        if (result != 1) // 1 = OK
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Steam lobby creation failed: {result}", ConsoleChannel.Network);
+            return;
+        }
+
+        _steamLobbyId = lobbyId;
+        try
+        {
+            Steam.SetLobbyData(lobbyId, "name", STEAM_LOBBY_NAME);
+        }
+        catch {}
+
+        if (!_pendingHostLobbyCreation)
+        {
+            ConsoleSystem.Log("[NetworkService] Ignoring lobby_created (not from HostSteamLobby)", ConsoleChannel.Network);
+            return;
+        }
+        _pendingHostLobbyCreation = false;
+
+        try
+        {
+            // Create host peer and attach immediately
+            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
+            var obj = (GodotObject)inst;
+            if (obj is MultiplayerPeer mp)
+            {
+                var createErr = obj.Call("create_host");
+                long err = 0;
+                try { err = (long)createErr; } catch { err = 0; }
+                if (err == 0)
+                {
+                    AttachServerPeer(mp);
+                    ConsoleSystem.Log($"[NetworkService] Steam P2P host ready; lobby={lobbyId}", ConsoleChannel.Network);
+                }
+                else
+                {
+                    ConsoleSystem.LogErr($"[NetworkService] create_host failed: {err}", ConsoleChannel.Network);
+                }
+            }
+            else
+            {
+                ConsoleSystem.LogErr("[NetworkService] Could not instantiate SteamMultiplayerPeer for host", ConsoleChannel.Network);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Exception creating host: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    private void OnSteamLobbyJoined(ulong lobbyId, long permissions, bool locked, long response)
+    {
+        ConsoleSystem.Log($"[NetworkService] Lobby joined: {lobbyId}, response={response}, locked={locked}", ConsoleChannel.Network);
+        if (response != 1) return;
+
+        _steamLobbyId = lobbyId;
+
+        // Determine host
+        ulong hostSteamId = 0;
+        try { hostSteamId = Steam.GetLobbyOwner(lobbyId); } catch {}
+        ulong localId = 0;
+        try { localId = Steam.GetSteamID(); } catch {}
+
+        if (hostSteamId == 0)
+        {
+            ConsoleSystem.LogWarn("[NetworkService] Host SteamID unknown on lobby join", ConsoleChannel.Network);
+            return;
+        }
+
+        // If we are host, we already created host on lobby_created
+        if (hostSteamId == localId)
+        {
+            ConsoleSystem.Log("[NetworkService] We are lobby host (Steam)", ConsoleChannel.Network);
+            return;
+        }
+
+        // Create client peer to host
+        try
+        {
+            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
+            var obj = (GodotObject)inst;
+            if (obj is MultiplayerPeer mp)
+            {
+                var createErr = obj.Call("create_client", hostSteamId);
+                long err = 0;
+                try { err = (long)createErr; } catch { err = 0; }
+                if (err == 0)
+                {
+                    AttachClientPeer(mp);
+                    ConsoleSystem.Log($"[NetworkService] Steam P2P client connected to host {hostSteamId}", ConsoleChannel.Network);
+
+                    // Late join handling: if host already launched a game, load the scene now
+                    try
+                    {
+                        var launched = Steam.GetLobbyData(lobbyId, "game_launched");
+                        var scenePath = Steam.GetLobbyData(lobbyId, "game_scene_path");
+                        if (!string.IsNullOrEmpty(launched) && launched == "true")
+                        {
+                            if (string.IsNullOrEmpty(scenePath)) scenePath = "res://scenes/dev/dev.tscn";
+                            ConsoleSystem.Log($"[NetworkService] Detected launched game on join; loading {scenePath}", ConsoleChannel.Network);
+                            GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
+                        }
+                    }
+                    catch {}
+                }
+                else
+                {
+                    ConsoleSystem.LogErr($"[NetworkService] create_client failed: {err}", ConsoleChannel.Network);
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Exception creating client: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    private void OnSteamLobbyMatchList(Godot.Collections.Array lobbies)
+    {
+        ConsoleSystem.Log($"[NetworkService] Lobby list received: {lobbies.Count}", ConsoleChannel.Network);
+        for (int i = 0; i < lobbies.Count; i++)
+        {
+            var id = lobbies[i].AsUInt64();
+            string name = string.Empty;
+            try { name = Steam.GetLobbyData(id, "name"); } catch {}
+            ConsoleSystem.Log($"  - {id} name='{name}'", ConsoleChannel.Network);
+        }
+    }
+
+    private void AttachServerPeer(MultiplayerPeer peer)
+    {
+        var mp = GetTree()?.GetMultiplayer();
+        if (mp == null) return;
+
+        mp.MultiplayerPeer = peer;
+        _mode = NetworkMode.Server;
+
+        mp.PeerConnected += OnPeerConnected;
+        mp.PeerDisconnected += OnPeerDisconnected;
+
+        ConsoleSystem.Log("[NetworkService] Server started (Steam P2P)", ConsoleChannel.Network);
+        GameEvent.DispatchGlobal(new NetworkServerStartedEvent(_config.ServerPort));
+    }
+
+    private void AttachClientPeer(MultiplayerPeer peer)
+    {
+        var mp = GetTree()?.GetMultiplayer();
+        if (mp == null) return;
+
+        mp.MultiplayerPeer = peer;
+        _mode = NetworkMode.Client;
+
+        mp.ConnectedToServer += OnConnectedToServer;
+        mp.ConnectionFailed += OnConnectionFailed;
+        mp.ServerDisconnected += OnServerDisconnected;
+
+        ConsoleSystem.Log("[NetworkService] Connecting as client (Steam P2P)", ConsoleChannel.Network);
+    }
+
+    #endregion
+
     public void OnGameEvent(GameInitializedEvent eventArgs)
     {
         // Auto-start local server for singleplayer if configured
@@ -98,13 +401,37 @@ public partial class NetworkService : BaseService,
 
     public void OnGameEvent(SceneLoadEvent eventArgs)
     {
+        _inGameplayScene = !string.Equals(eventArgs.ScenePath, "res://scenes/ui/MainMenu.tscn", System.StringComparison.OrdinalIgnoreCase);
         // When a new gameplay scene is loaded in multiplayer, spawn players for all connected peers
-        if (IsServer && !string.Equals(eventArgs.ScenePath, "res://scenes/ui/MainMenu.tscn", System.StringComparison.OrdinalIgnoreCase))
+        if (IsServer && _inGameplayScene)
         {
-            ConsoleSystem.Log($"[NetworkService] Scene loaded in multiplayer: {eventArgs.ScenePath}, spawning all players (connected={_connectedClients.Count})", ConsoleChannel.Network);
+            // Report both our bookkeeping and Godot peer list for clarity
+            var mp = GetTree()?.GetMultiplayer();
+            int godotPeers = 0;
+            try
+            {
+                var peers = mp != null ? mp.GetPeers() : null;
+                godotPeers = peers != null ? peers.Length : 0;
+            }
+            catch { godotPeers = 0; }
+            ConsoleSystem.Log($"[NetworkService] Scene loaded in multiplayer: {eventArgs.ScenePath}, spawning all players (connected={_connectedClients.Count}, godotPeers={godotPeers})", ConsoleChannel.Network);
             
-            // Give the scene a moment to initialize - use CallDeferred to ensure we're in the proper context
-            CallDeferred(MethodName.SpawnAllPlayers);
+            // Give extra time for clients to finish connecting before spawning
+            var timer = GetTree()?.CreateTimer(0.8f);
+            if (timer != null)
+            {
+                timer.Timeout += () =>
+                {
+                    CallDeferred(MethodName.SpawnAllPlayers);
+                    // After spawning, reconcile once more in case peers finalized during delay
+                    CallDeferred(MethodName.ReconcilePlayersWithConnectedPeers);
+                };
+            }
+            else
+            {
+                CallDeferred(MethodName.SpawnAllPlayers);
+                CallDeferred(MethodName.ReconcilePlayersWithConnectedPeers);
+            }
         }
     }
 
@@ -126,6 +453,24 @@ public partial class NetworkService : BaseService,
                 ConsoleSystem.Log($"[NetworkService] No multiplayer peer active, skipping RPC broadcast (solo lobby)", ConsoleChannel.Network);
             }
         }
+        else
+        {
+            // Client-side: ensure we have a Steam client peer connected to the leader
+            try
+            {
+                var mp = GetTree()?.GetMultiplayer();
+                var hasPeer = mp?.MultiplayerPeer != null && mp.MultiplayerPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+                if (!hasPeer && PlatformService.IsSteamInitialized)
+                {
+                    var partyService = GetNodeOrNull<Waterjam.Game.Services.Party.PartyService>("/root/PartyService");
+                    partyService?.EnsureClientConnectedToLeader();
+                }
+            }
+            catch (System.Exception ex)
+            {
+                ConsoleSystem.LogWarn($"[NetworkService] Client ensure connect on NewGameStartedEvent failed: {ex.Message}", ConsoleChannel.Network);
+            }
+        }
     }
 
     // Removed legacy LobbyStartedEvent handler during Party migration
@@ -142,19 +487,23 @@ public partial class NetworkService : BaseService,
     private void SpawnAllPlayers()
     {
         if (!IsServer) return;
+        if (!_inGameplayScene) return;
 
-        ConsoleSystem.Log($"[NetworkService] Spawning all players after scene load; server will spawn {1 + _connectedClients.Keys.Count(k => k != 1)} players", ConsoleChannel.Network);
+		// Use server's connection tracking for accuracy
+		int remoteCount = _connectedClients.Keys.Count(k => k != 1);
+
+		ConsoleSystem.Log($"[NetworkService] Spawning all players after scene load; server will spawn {1 + remoteCount} players", ConsoleChannel.Network);
 
         // Spawn local player (peer ID 1 for server)
         SpawnPlayerForClient(1);
         
-        // Spawn all connected remote clients
-        foreach (var clientId in _connectedClients.Keys.ToArray())
+		// Spawn all connected remote clients
+		IEnumerable<long> peerIds = _connectedClients.Keys.Where(id => id != 1).Select(id => (long)id);
+
+		foreach (var clientId in peerIds.ToArray())
         {
-            if (clientId != 1) // Skip server/local player
-            {
-                SpawnPlayerForClient(clientId);
-            }
+			if (clientId == 1) continue; // Skip server/local player
+			SpawnPlayerForClient(clientId);
         }
     }
 
@@ -266,7 +615,26 @@ public partial class NetworkService : BaseService,
         _currentTick++;
 
         // Process queued inputs from clients
-        // TODO: Process input packets
+        try
+        {
+            foreach (var kvp in _connectedClients.ToArray())
+            {
+                var clientId = kvp.Key;
+                if (_serverInputQueues.TryGetValue(clientId, out var queue))
+                {
+                    while (queue.Count > 0)
+                    {
+                        var input = queue.Dequeue();
+                        kvp.Value.LastProcessedInput = input.SequenceNumber;
+                        GameEvent.DispatchGlobal(new NetworkInputReceivedEvent(clientId, input));
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Error processing input packets: {ex.Message}", ConsoleChannel.Network);
+        }
 
         // Run simulation
         GameEvent.DispatchGlobal(new NetworkServerTickEvent(_currentTick));
@@ -280,13 +648,38 @@ public partial class NetworkService : BaseService,
 
     private void SendSnapshotsToClients()
     {
-        // TODO: Gather world state and send to clients
-        // This will be implemented with the state replication system
+        if (!IsServer) return;
+
+        try
+        {
+            if (_networkedPlayers.Count == 0) return;
+
+            // Build compact snapshot arrays
+            var ids = _networkedPlayers.Keys.Select(k => (int)k).ToArray();
+            var positions = _networkedPlayers.Values.Select(p => p.GlobalPosition).ToArray();
+
+            var multiplayer = GetTree()?.GetMultiplayer();
+            if (multiplayer?.MultiplayerPeer != null && multiplayer.MultiplayerPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+            {
+                Rpc(MethodName.RpcClientApplySnapshot, ids, positions);
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] Failed to send snapshots: {ex.Message}", ConsoleChannel.Network);
+        }
     }
 
     private void OnPeerConnected(long peerId)
     {
-        ConsoleSystem.Log($"[NetworkService] Peer connected: {peerId}", ConsoleChannel.Network);
+        if (!_inGameplayScene)
+        {
+            ConsoleSystem.Log($"[NetworkService] Peer connected in non-gameplay scene; delaying spawn for {peerId}", ConsoleChannel.Network);
+        }
+        else
+        {
+            ConsoleSystem.Log($"[NetworkService] Peer connected: {peerId}", ConsoleChannel.Network);
+        }
 
         var clientState = new ClientState
         {
@@ -298,8 +691,12 @@ public partial class NetworkService : BaseService,
         _connectedClients[peerId] = clientState;
         GameEvent.DispatchGlobal(new NetworkClientConnectedEvent(peerId));
 
-        // Send handshake
-        SendHandshake(peerId);
+        // Send handshake and reconcile players only during gameplay
+        if (_inGameplayScene)
+        {
+            SendHandshake(peerId);
+            ReconcilePlayersWithConnectedPeers();
+        }
     }
 
     private void OnPeerDisconnected(long peerId)
@@ -311,6 +708,9 @@ public partial class NetworkService : BaseService,
 
         _connectedClients.Remove(peerId);
         GameEvent.DispatchGlobal(new NetworkClientDisconnectedEvent(peerId));
+
+        // Reconcile players to remove any remaining proxies
+        ReconcilePlayersWithConnectedPeers();
     }
 
     private void SendHandshake(long peerId)
@@ -323,11 +723,61 @@ public partial class NetworkService : BaseService,
     }
 
     /// <summary>
+    /// Ensure spawned players match currently connected peers (including server 1).
+    /// </summary>
+    private void ReconcilePlayersWithConnectedPeers()
+    {
+        if (!IsServer) return;
+
+        try
+        {
+            var mp = GetTree()?.GetMultiplayer();
+            if (mp?.MultiplayerPeer == null || mp.MultiplayerPeer.GetConnectionStatus() != MultiplayerPeer.ConnectionStatus.Connected)
+            {
+                return;
+            }
+
+            var expected = new System.Collections.Generic.HashSet<long>();
+            expected.Add(1);
+            try
+            {
+                var peers = mp.GetPeers();
+                foreach (var id in peers)
+                {
+                    expected.Add(id);
+                }
+            }
+            catch { }
+
+            foreach (var id in expected)
+            {
+                if (!_networkedPlayers.ContainsKey(id))
+                {
+                    SpawnPlayerForClient(id);
+                }
+            }
+
+            foreach (var existing in _networkedPlayers.Keys.ToArray())
+            {
+                if (!expected.Contains(existing))
+                {
+                    RemovePlayerForClient(existing);
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[NetworkService] ReconcilePlayersWithConnectedPeers failed: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    /// <summary>
     /// Spawns a player entity for a newly connected client.
     /// </summary>
     private void SpawnPlayerForClient(long peerId)
     {
         if (!IsServer) return;
+        if (!_inGameplayScene) return;
 
         try
         {
@@ -346,8 +796,14 @@ public partial class NetworkService : BaseService,
                 return;
             }
 
-            // Find a spawn point (for now, just use origin with some offset)
-            var spawnPosition = new Vector3(peerId * 2, 2, 0);
+            // Deterministic small offset spawn positions
+            int index;
+            if (!_peerIdToSpawnIndex.TryGetValue(peerId, out index))
+            {
+                index = _nextSpawnIndex++;
+                _peerIdToSpawnIndex[peerId] = index;
+            }
+            var spawnPosition = new Vector3(index * 2, 2, 0);
 
             // Load the player scene
             var playerScene = GD.Load<PackedScene>("res://scenes/Player.tscn");
@@ -549,7 +1005,30 @@ public partial class NetworkService : BaseService,
         }
         else
         {
-            // TODO: Send to remote server
+            try
+            {
+                var mp = GetTree()?.GetMultiplayer();
+                if (mp?.MultiplayerPeer == null || mp.MultiplayerPeer.GetConnectionStatus() != MultiplayerPeer.ConnectionStatus.Connected)
+                {
+                    return;
+                }
+
+                var actionsDict = new Godot.Collections.Dictionary();
+                if (input.Actions != null)
+                {
+                    foreach (var kv in input.Actions)
+                    {
+                        actionsDict[kv.Key] = kv.Value;
+                    }
+                }
+
+                // Server is peer 1
+                RpcId(1, MethodName.RpcServerReceiveInput, input.SequenceNumber, input.Tick, input.Movement, input.Look, actionsDict);
+            }
+            catch (Exception ex)
+            {
+                ConsoleSystem.LogErr($"[NetworkService] Failed to send input to server: {ex.Message}", ConsoleChannel.Network);
+            }
         }
     }
 
@@ -591,11 +1070,12 @@ public partial class NetworkService : BaseService,
             playerInstance.Name = playerName ?? $"Player_{peerId}";
             try
             {
-                playerInstance.SetMultiplayerAuthority(peerId);
+                // Server-authoritative on clients
+                playerInstance.SetMultiplayerAuthority(1);
             }
             catch (Exception authEx)
             {
-                ConsoleSystem.LogWarn($"[NetworkService] RpcClientSpawnPlayer: Failed to set authority for {peerId}: {authEx.Message}", ConsoleChannel.Network);
+                ConsoleSystem.LogWarn($"[NetworkService] RpcClientSpawnPlayer: Failed to set authority to server for {peerId}: {authEx.Message}", ConsoleChannel.Network);
             }
 
             currentScene.AddChild(playerInstance);
@@ -697,6 +1177,40 @@ public partial class NetworkService : BaseService,
     {
         var consoleSystem = GetNodeOrNull<ConsoleSystem>("/root/ConsoleSystem");
         if (consoleSystem == null) return;
+        consoleSystem.RegisterCommand(new ConsoleCommand(
+            "net_start_game",
+            "Host: start multiplayer game and load scene for lobby",
+            "net_start_game [scene_path]",
+            async (args) =>
+            {
+                var scenePath = args.Length > 0 ? args[0] : "res://scenes/dev/dev.tscn";
+                try
+                {
+                    // Set Steam lobby data so clients detect game start
+                    var partyService = GetNodeOrNull<Waterjam.Game.Services.Party.PartyService>("/root/PartyService");
+                    if (partyService != null && PlatformService.IsSteamInitialized)
+                    {
+                        var lobbyId = partyService.GetCurrentSteamLobbyId();
+                        if (lobbyId != 0)
+                        {
+                            var leaderId = partyService.GetLocalPlayerId();
+                            Steam.SetLobbyData(lobbyId, "game_launched", "true");
+                            Steam.SetLobbyData(lobbyId, "game_scene_path", scenePath);
+                            Steam.SetLobbyData(lobbyId, "game_leader", leaderId ?? "");
+                            ConsoleSystem.Log($"[NetworkService] net_start_game set lobby data; scene={scenePath}", ConsoleChannel.Network);
+                        }
+                    }
+
+                    // Start game locally; NetworkService will broadcast scene via RPC if server
+                    GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
+                    return true;
+                }
+                catch (System.Exception ex)
+                {
+                    ConsoleSystem.LogErr($"[NetworkService] net_start_game failed: {ex.Message}", ConsoleChannel.Network);
+                    return false;
+                }
+            }));
 
         // Server commands
         consoleSystem.RegisterCommand(new ConsoleCommand(
@@ -731,65 +1245,44 @@ public partial class NetworkService : BaseService,
         // Multiplayer testing commands
         consoleSystem.RegisterCommand(new ConsoleCommand(
             "net_create_lobby",
-            "Create a Steam lobby for multiplayer",
+            "Create a Steam lobby for multiplayer (playbook flow)",
             "net_create_lobby [max_players]",
             async (args) =>
             {
                 int maxPlayers = args.Length > 0 && int.TryParse(args[0], out var p) ? p : 8;
-
-                if (!PlatformService.IsSteamInitialized)
-                {
-                    ConsoleSystem.LogErr("Steam is not initialized. Make sure Steam is running.", ConsoleChannel.Network);
-                    return false;
-                }
-
-                // Switch to Steam backend if not already
-                if (_config.Backend != NetworkBackend.Steam)
-                {
-                    _config.Backend = NetworkBackend.Steam;
-                    InitializeAdapter();
-                    ConsoleSystem.Log("Switched to Steam networking backend", ConsoleChannel.Network);
-                }
-
-                var success = StartServer(0);
-                if (success)
-                {
-                    var steamAdapter = _adapter as SteamNetworkAdapter;
-                    if (steamAdapter != null)
-                    {
-                        ConsoleSystem.Log($"Steam lobby created! Join code: {steamAdapter.GetLobbyJoinCode()}", ConsoleChannel.Network);
-                    }
-                }
-                return success;
+                return HostSteamLobby(maxPlayers);
             }));
 
         consoleSystem.RegisterCommand(new ConsoleCommand(
             "net_join_lobby",
-            "Join a Steam lobby using join code",
-            "net_join_lobby <join_code>",
+            "Join a Steam lobby by lobby ID (playbook flow)",
+            "net_join_lobby <lobby_id>",
             async (args) =>
             {
                 if (args.Length == 0)
                 {
-                    ConsoleSystem.Log("Usage: net_join_lobby <join_code>", ConsoleChannel.Network);
+                    ConsoleSystem.Log("Usage: net_join_lobby <lobby_id>", ConsoleChannel.Network);
                     return false;
                 }
 
-                if (!PlatformService.IsSteamInitialized)
+                if (!ulong.TryParse(args[0], out var lobbyId))
                 {
-                    ConsoleSystem.LogErr("Steam is not initialized. Make sure Steam is running.", ConsoleChannel.Network);
+                    ConsoleSystem.Log("Invalid lobby ID", ConsoleChannel.Network);
                     return false;
                 }
 
-                // Switch to Steam backend if not already
-                if (_config.Backend != NetworkBackend.Steam)
-                {
-                    _config.Backend = NetworkBackend.Steam;
-                    InitializeAdapter();
-                    ConsoleSystem.Log("Switched to Steam networking backend", ConsoleChannel.Network);
-                }
+                return JoinSteamLobby(lobbyId);
+            }));
 
-                return ConnectToServer(args[0], 0);
+        // Convenience: list lobbies matching our game name
+        consoleSystem.RegisterCommand(new ConsoleCommand(
+            "net_list_lobbies",
+            "List Steam lobbies filtered by game name",
+            "net_list_lobbies",
+            async (args) =>
+            {
+                ListSteamLobbies();
+                return true;
             }));
 
         consoleSystem.RegisterCommand(new ConsoleCommand(
@@ -814,7 +1307,15 @@ public partial class NetworkService : BaseService,
                 if (IsServer)
                 {
                     ConsoleSystem.Log($"Tick: {_currentTick}", ConsoleChannel.Network);
-                    ConsoleSystem.Log($"Connected clients: {_connectedClients.Count}", ConsoleChannel.Network);
+                    var mp = GetTree()?.GetMultiplayer();
+                    int peerCount = 0;
+                    try
+                    {
+                        var peers = mp != null ? mp.GetPeers() : null;
+                        peerCount = peers != null ? peers.Length : 0;
+                    }
+                    catch { peerCount = 0; }
+                    ConsoleSystem.Log($"Connected clients: {_connectedClients.Count} (Godot peers: {peerCount})", ConsoleChannel.Network);
                 }
 
                 if (IsClient)
@@ -855,6 +1356,96 @@ public partial class NetworkService : BaseService,
                 ConsoleSystem.Log($"Backend set to {backend}", ConsoleChannel.Network);
                 return true;
             }));
+    }
+
+    #endregion
+
+    #region RPC: Client -> Server Input
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.UnreliableOrdered)]
+    private void RpcServerReceiveInput(ulong sequence, ulong tick, Vector3 movement, Vector2 look, Godot.Collections.Dictionary actions)
+    {
+        if (!IsServer) return;
+
+        try
+        {
+            var senderId = GetTree()?.GetMultiplayer()?.GetRemoteSenderId() ?? 0;
+            if (senderId == 0) return;
+
+            var actionsMap = new Dictionary<string, bool>();
+            if (actions != null)
+            {
+                foreach (Variant keyVar in actions.Keys)
+                {
+                    string keyStr;
+                    try { keyStr = keyVar.AsString(); }
+                    catch { keyStr = keyVar.ToString(); }
+
+                    Variant valueVar = actions[keyVar];
+                    bool valueBool;
+                    try { valueBool = valueVar.AsBool(); }
+                    catch { valueBool = false; }
+
+                    actionsMap[keyStr] = valueBool;
+                }
+            }
+
+            var packet = new InputPacket
+            {
+                SequenceNumber = sequence,
+                Tick = tick,
+                Movement = movement,
+                Look = look,
+                Actions = actionsMap
+            };
+
+            if (!_serverInputQueues.TryGetValue(senderId, out var queue))
+            {
+                queue = new Queue<InputPacket>();
+                _serverInputQueues[senderId] = queue;
+            }
+            queue.Enqueue(packet);
+
+            if (_connectedClients.TryGetValue(senderId, out var state))
+            {
+                state.LastHeartbeat = Time.GetTicksMsec();
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] RpcServerReceiveInput failed: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    #endregion
+
+    #region RPC: Server -> Client Snapshots
+
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, CallLocal = false, TransferMode = MultiplayerPeer.TransferModeEnum.UnreliableOrdered)]
+    private void RpcClientApplySnapshot(int[] peerIds, Vector3[] positions)
+    {
+        if (IsServer) return;
+        if (peerIds == null || positions == null) return;
+        if (peerIds.Length != positions.Length) return;
+
+        try
+        {
+            var localId = GetTree()?.GetMultiplayer()?.GetUniqueId() ?? 0;
+            for (int i = 0; i < peerIds.Length; i++)
+            {
+                var pid = (long)peerIds[i];
+                if (_networkedPlayers.TryGetValue(pid, out var player))
+                {
+                    // Do not override local authoritative player on client
+                    if (player.GetMultiplayerAuthority() == localId) continue;
+                    player.GlobalPosition = positions[i];
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleSystem.LogErr($"[NetworkService] RpcClientApplySnapshot failed: {ex.Message}", ConsoleChannel.Network);
+        }
     }
 
     #endregion

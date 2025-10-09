@@ -67,6 +67,93 @@ public partial class PartyService : BaseService,
         RegisterConsoleCommands();
     }
 
+    /// <summary>
+    /// Ensure the Steam addon client peer is created and connected to the given host Steam ID.
+    /// Safe to call multiple times; no-ops if already connected.
+    /// </summary>
+    private void EnsureClientPeerConnected(ulong hostSteamId, string context)
+    {
+        try
+        {
+            var mpApi = GetTree()?.GetMultiplayer();
+            if (mpApi == null)
+            {
+                ConsoleSystem.LogWarn($"[PartyService] ({context}) Multiplayer API missing", ConsoleChannel.Network);
+                return;
+            }
+
+            var currentPeer = mpApi.MultiplayerPeer;
+            if (currentPeer != null && currentPeer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected)
+            {
+                // Already connected
+                return;
+            }
+
+            var inst = ClassDB.Instantiate("SteamMultiplayerPeer");
+            GodotObject obj = (GodotObject)inst;
+            if (obj is MultiplayerPeer peer)
+            {
+                var createErr = obj.Call("create_client", hostSteamId);
+                long err = 0;
+                try { err = (long)createErr; } catch { err = 0; }
+                if (err == 0)
+                {
+                    mpApi.MultiplayerPeer = peer;
+                    try
+                    {
+                        var status = peer.GetConnectionStatus();
+                        var uid = mpApi.GetUniqueId();
+                        ConsoleSystem.Log($"[PartyService] ({context}) Created SteamMultiplayerPeer client to host {hostSteamId}; status={status}, uid={uid}", ConsoleChannel.Network);
+                    }
+                    catch { }
+                }
+                else
+                {
+                    ConsoleSystem.LogErr($"[PartyService] ({context}) create_client returned {err}", ConsoleChannel.Network);
+                }
+            }
+            else
+            {
+                ConsoleSystem.LogErr($"[PartyService] ({context}) Could not instantiate SteamMultiplayerPeer", ConsoleChannel.Network);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"[PartyService] ({context}) EnsureClientPeerConnected failed: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
+    /// <summary>
+    /// Public helper to ensure the local client is connected to the party leader via Steam.
+    /// Used by UI flows when a multiplayer game is starting.
+    /// </summary>
+    public void EnsureClientConnectedToLeader()
+    {
+        try
+        {
+            if (!PlatformService.IsSteamInitialized)
+            {
+                return;
+            }
+
+            var lobbyId = _currentSteamLobbyId;
+            if (lobbyId == 0)
+            {
+                return;
+            }
+
+            var leaderSteamId = Steam.GetLobbyOwner(lobbyId);
+            if (leaderSteamId != 0)
+            {
+                EnsureClientPeerConnected(leaderSteamId, "EnsureClientConnectedToLeader");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[PartyService] EnsureClientConnectedToLeader failed: {ex.Message}", ConsoleChannel.Network);
+        }
+    }
+
     private void SetupSteamCallbacks()
     {
         // Listen for Steam lobby events that affect party management
@@ -86,6 +173,8 @@ public partial class PartyService : BaseService,
             
             // Set lobby type to party so peers know this is a party lobby
             Steam.SetLobbyData(lobbyId, "lobby_type", "party");
+            // Ensure standard name key used by NetworkService filtering
+            try { Steam.SetLobbyData(lobbyId, "name", "Waterjam3D"); } catch {}
             
             // Store party info
             var party = GetCurrentPlayerParty();
@@ -159,6 +248,59 @@ public partial class PartyService : BaseService,
                 }
             }
         }
+
+        // Attempt to ensure client is connected to leader on any successful lobby join
+        try
+        {
+            var hostSteamId = Steam.GetLobbyOwner(lobbyId);
+            if (hostSteamId != 0)
+            {
+                EnsureClientPeerConnected(hostSteamId, "OnSteamLobbyJoined(initial)");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[PartyService] Failed to ensure client peer on initial lobby join: {ex.Message}", ConsoleChannel.Network);
+        }
+
+        // If a game is already launched by the host, immediately load that scene
+        try
+        {
+            var gameLaunched = Steam.GetLobbyData(lobbyId, "game_launched");
+            var gameScenePath = Steam.GetLobbyData(lobbyId, "game_scene_path");
+            var gameLeader = Steam.GetLobbyData(lobbyId, "game_leader");
+
+            if (!string.IsNullOrEmpty(gameLaunched) && gameLaunched == "true")
+            {
+                // Ensure client peer exists and is connected to host
+                try
+                {
+                    if (!string.IsNullOrEmpty(gameLeader) && ulong.TryParse(gameLeader, out var leaderSteamId))
+                    {
+                        EnsureClientPeerConnected(leaderSteamId, "OnSteamLobbyJoined");
+                    }
+                    else
+                    {
+                        ConsoleSystem.LogWarn("[PartyService] game_leader missing or invalid on game_launched (OnSteamLobbyJoined)", ConsoleChannel.Network);
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    ConsoleSystem.LogWarn($"[PartyService] Failed to ensure client peer on game_launched: {ex.Message}", ConsoleChannel.Network);
+                }
+
+                // Ensure scene path fallback
+                var scenePath = !string.IsNullOrEmpty(gameScenePath) ? gameScenePath : "res://scenes/dev/dev.tscn";
+                ConsoleSystem.Log($"[PartyService] Lobby has game_launched=true; loading scene: {scenePath}", ConsoleChannel.Game);
+
+                // Trigger the game start flow locally
+                GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogWarn($"[PartyService] Failed to auto-load launched game scene: {ex.Message}", ConsoleChannel.Game);
+        }
     }
 
     private void OnSteamLobbyDataUpdate(uint success, ulong lobbyId, ulong memberId)
@@ -180,11 +322,28 @@ public partial class PartyService : BaseService,
                 if (!string.IsNullOrEmpty(gameLeader) && gameLeader != _localPlayerId)
                 {
                     ConsoleSystem.Log($"[PartyService] Game launched by host, loading scene: {gameScenePath}", ConsoleChannel.Game);
-                    
+
+                    // Ensure client has a connected peer to the host
+                    try
+                    {
+                        if (ulong.TryParse(gameLeader, out var leaderSteamId))
+                        {
+                            EnsureClientPeerConnected(leaderSteamId, "OnSteamLobbyDataUpdate");
+                        }
+                        else
+                        {
+                            ConsoleSystem.LogWarn("[PartyService] game_leader invalid on lobby data update", ConsoleChannel.Network);
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        ConsoleSystem.LogWarn($"[PartyService] Failed to ensure client peer on lobby data: {ex.Message}", ConsoleChannel.Network);
+                    }
+
                     // Load the scene directly
                     var scenePath = !string.IsNullOrEmpty(gameScenePath) ? gameScenePath : "res://scenes/dev/dev.tscn";
                     GameEvent.DispatchGlobal(new NewGameStartedEvent(scenePath));
-                    
+
                     // Note: Don't clear the flag here - let the host do it
                     // Clients shouldn't modify lobby data
                     return;
@@ -208,6 +367,12 @@ public partial class PartyService : BaseService,
                     
                     // Trigger the main menu to show lobby UI (this will handle networking connection)
                     GameEvent.DispatchGlobal(new UiShowLobbyScreenEvent());
+
+                        // Also ensure client peer proactively if leader is known
+                        if (ulong.TryParse(gameLeader, out var leaderSteamId))
+                        {
+                            EnsureClientPeerConnected(leaderSteamId, "OnSteamLobbyDataUpdate(game_starting)");
+                        }
                     return;
                 }
             }
@@ -231,44 +396,7 @@ public partial class PartyService : BaseService,
                         GameEvent.DispatchGlobal(new JoinLobbyRequestEvent(gameLobbyId));
                     }
 
-                    // Ensure Steam backend is active, then attempt client connect to leader via Steam
-                    var networkService = GetNodeOrNull<NetworkService>("/root/NetworkService");
-                    if (networkService != null)
-                    {
-                        if (networkService.CurrentBackend != NetworkBackend.Steam)
-                        {
-                            try
-                            {
-                                var reflectedConfig = networkService.GetType().GetField("_config", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                                var config = reflectedConfig?.GetValue(networkService) as NetworkConfig;
-                                if (config != null)
-                                {
-                                    config.Backend = NetworkBackend.Steam;
-                                    var initMethod = networkService.GetType().GetMethod("InitializeAdapter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                                    initMethod?.Invoke(networkService, null);
-                                    ConsoleSystem.Log("[PartyService] Switched to Steam networking backend (client)", ConsoleChannel.Network);
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                ConsoleSystem.LogWarn($"[PartyService] Failed to switch backend to Steam: {ex.Message}", ConsoleChannel.Network);
-                            }
-                        }
-
-                        if (networkService.CurrentBackend == NetworkBackend.Steam && _lastConnectLeaderId != leaderId)
-                        {
-                            _lastConnectLeaderId = leaderId;
-                            try
-                            {
-                                networkService.ConnectToServer(leaderId, 0);
-                                ConsoleSystem.Log($"[PartyService] Connecting to lobby leader {leaderId} via Steam", ConsoleChannel.Network);
-                            }
-                            catch (Exception ex)
-                            {
-                                ConsoleSystem.LogWarn($"[PartyService] Failed to connect to leader {leaderId}: {ex.Message}", ConsoleChannel.Network);
-                            }
-                        }
-                    }
+                    // With addon peer, client creation happens via lobby join; skip direct network connect
                 }
             }
         }
