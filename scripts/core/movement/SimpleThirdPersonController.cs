@@ -30,6 +30,7 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 	[Export] public float CameraHeight { get; set; } = 1.8f;
 	[Export] public float MinPitchDeg { get; set; } = -60f;
 	[Export] public float MaxPitchDeg { get; set; } = 80f;
+    [Export] public bool AlignFacingWithMovement { get; set; } = false;
 
 	// Lightweight stamina (for UI only when StaminaComponent absent)
 	[ExportGroup("Stamina (Lightweight)")]
@@ -57,12 +58,16 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 	[Export] public float SlideFriction { get; set; } = 6f;
 	[Export] public float MaxWalkableSlopeDegrees { get; set; } = 40f;
 	[Export] public float SlopeSlideAcceleration { get; set; } = 20f;
+    [Export] public float MaxSlideSpeed { get; set; } = 18f;
+    [Export] public float SlideGroundGraceSeconds { get; set; } = 0.12f;
+    [Export] public float SlideSnapLength { get; set; } = 0.5f;
 	private bool _isSliding;
 	private float _slideTimer;
 	private Vector3 _slideDir;
 	public bool IsOnSlope { get; private set; }
 	private Vector3 _floorNormal = Vector3.Up;
 	private float _slopeAngleDeg;
+    private float _slideGroundGraceTimer;
 
 	private const string MetaAnimDash = "anim_dash";
 	private const string MetaAnimSlide = "anim_slide";
@@ -103,7 +108,8 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 	[Export] public float DashToSlideWindow { get; set; } = 0.18f;
 	private float _postDashWindow;
 
-	private Camera3D _camera;
+    private Camera3D _camera;
+    private SpringArm3D _springArm; // when present, we read yaw from this instead of mouse
 	private Label _speedLabel;
 	private MovementUI _movementUi;
 
@@ -115,7 +121,12 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 
 	public override void _Ready()
 	{
-		_camera = GetNodeOrNull<Camera3D>("Camera3D");
+        _camera = GetNodeOrNull<Camera3D>("Camera3D");
+        _springArm = GetNodeOrNull<SpringArm3D>("SpringArm3D");
+        if (_springArm != null && _camera == null)
+        {
+            _camera = _springArm.GetNodeOrNull<Camera3D>("Camera3D");
+        }
 		_stamina = GetNodeOrNull<StaminaComponent>("StaminaComponent");
 
 		// Apply MovementConfig if provided, then propagate to components
@@ -160,15 +171,21 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 			}
 		}
 
-		if (_camera == null)
-		{
-			_camera = new Camera3D();
-			AddChild(_camera);
-		}
+        if (_springArm == null)
+        {
+            if (_camera == null)
+            {
+                _camera = new Camera3D();
+                AddChild(_camera);
+            }
+        }
 
 		_yawDegrees = RotationDegrees.Y;
 		_pitchDegrees = 10f;
 		Input.MouseMode = Input.MouseModeEnum.Captured;
+
+        // Default light snap to keep us grounded over tiny bumps when not sliding
+        FloorSnapLength = 0.1f;
 	}
 
 	private void ApplyConfigValues()
@@ -279,9 +296,9 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 		return false;
 	}
 
-	public override void _Input(InputEvent @event)
+    public override void _Input(InputEvent @event)
 	{
-		if (@event is InputEventMouseMotion motion)
+        if (_springArm == null && @event is InputEventMouseMotion motion)
 		{
 			_yawDegrees -= motion.Relative.X * MouseSensitivity;
 			_pitchDegrees -= motion.Relative.Y * MouseSensitivity;
@@ -309,16 +326,29 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 		// cooldowns
 		if (_dashCooldownTimer > 0) _dashCooldownTimer -= (float)delta;
 
-		// Movement input (camera-relative)
+        // Movement input (camera-relative)
 		var inputVec = Input.GetVector("move_left", "move_right", "move_forward", "move_back");
 		var inputX = inputVec[0];
 		var inputZ = -inputVec[1]; // invert because GetVector returns negative for our "forward"
 
-		// Build yaw basis (Godot forward is -Z)
-		var yawRad = Mathf.DegToRad(_yawDegrees);
-		var yawBasis = new Basis(Vector3.Up, yawRad);
-		var camForward = (yawBasis * Vector3.Forward).Normalized(); // Vector3.Forward = (0,0,-1)
-		var camRight = (yawBasis * Vector3.Right).Normalized();
+        // Build camera-relative basis
+        Vector3 camForward;
+        Vector3 camRight;
+        if (_camera != null)
+        {
+            // Godot forward is -Z; flatten to horizontal
+            var fwd = (-_camera.GlobalTransform.Basis.Z);
+            camForward = new Vector3(fwd[0], 0, fwd[2]).Normalized();
+            var right = _camera.GlobalTransform.Basis.X;
+            camRight = new Vector3(right[0], 0, right[2]).Normalized();
+        }
+        else
+        {
+            var yawRad = Mathf.DegToRad(_yawDegrees);
+            var yawBasis = new Basis(Vector3.Up, yawRad);
+            camForward = (yawBasis * Vector3.Forward).Normalized();
+            camRight = (yawBasis * Vector3.Right).Normalized();
+        }
 
 		// Dash start (requires charge if stamina present)
 		if (!_isDashing && Input.IsActionJustPressed("dash") && _dashCooldownTimer <= 0)
@@ -340,6 +370,9 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 		// Update slope state (uses last frame floor normal if available)
 		UpdateSlopeState();
 
+        // Update slide ground grace window
+        if (IsOnFloor()) _slideGroundGraceTimer = SlideGroundGraceSeconds; else _slideGroundGraceTimer = Mathf.Max(0f, _slideGroundGraceTimer - (float)delta);
+
 		// Slide start (grounded). If on a slope, allow crouch/slide to start regardless of current speed
 		if (!_isSliding && IsOnFloor() && (Input.IsActionJustPressed("slide") || Input.IsActionJustPressed("crouch")))
 		{
@@ -347,9 +380,11 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 			var canStart = IsOnSlope ? true : horizontalSpeed >= MinSlideSpeed;
 			if (canStart)
 			{
-				var dir = new Vector3(_velocity[0], 0, _velocity[2]).Length() > 0.01f
-					? new Vector3(_velocity[0], 0, _velocity[2]).Normalized()
-					: GetDownSlopeDirection();
+				var dir = IsOnSlope
+					? GetDownSlopeDirection()
+					: (new Vector3(_velocity[0], 0, _velocity[2]).Length() > 0.01f
+						? new Vector3(_velocity[0], 0, _velocity[2]).Normalized()
+						: -GlobalTransform.Basis.Z);
 				StartSlide(dir);
 				SetMeta(MetaAnimSlide, true);
 			}
@@ -396,35 +431,59 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 			// Regular movement / slide
 			if (_isSliding)
 			{
-				_slideTimer -= (float)delta;
-				var speed = new Vector3(_velocity[0], 0, _velocity[2]).Length();
-				// accelerate down slope if on slope, otherwise apply frictional decay
+				// Calculate current speed along slide direction (no uphill component)
+				var horizontalVel = new Vector3(_velocity[0], 0, _velocity[2]);
+				var signedSpeed = horizontalVel.Dot(_slideDir);
+				signedSpeed = Mathf.Max(0f, signedSpeed);
+
+                // Stick to ground while sliding
+                FloorSnapLength = SlideSnapLength;
+                if (_velocity[1] > -2f) _velocity[1] = -2f;
+
 				if (IsOnSlope)
 				{
+					// Continuously align with downslope and accelerate while slide is held
 					var downSlopeDir = GetDownSlopeDirection();
-					// Blend slide direction toward downslope for stability
-					_slideDir = _slideDir.Lerp(downSlopeDir, 0.1f).Normalized();
-					speed += SlopeSlideAcceleration * Mathf.Sin(Mathf.DegToRad(_slopeAngleDeg)) * (float)delta;
+					if (downSlopeDir != Vector3.Zero)
+						_slideDir = _slideDir.Lerp(downSlopeDir, 0.2f).Normalized();
+
+					if (Input.IsActionPressed("slide") || Input.IsActionPressed("crouch"))
+					{
+						signedSpeed += SlopeSlideAcceleration * Mathf.Sin(Mathf.DegToRad(_slopeAngleDeg)) * (float)delta;
+						signedSpeed = Mathf.Min(signedSpeed, MaxSlideSpeed);
+					}
 				}
 				else
 				{
-					speed = Mathf.Max(speed - SlideFriction * (float)delta, MinSlideSpeed * 0.5f);
+					// Flat ground: decay speed and end when timer expires
+					signedSpeed = Mathf.Max(signedSpeed - SlideFriction * (float)delta, 0f);
+					_slideTimer -= (float)delta;
 				}
-				var slideVel = _slideDir * speed;
+
+				var slideVel = _slideDir * signedSpeed;
 				_velocity[0] = slideVel[0];
 				_velocity[2] = slideVel[2];
-				if (_slideTimer <= 0 || !IsOnFloor())
+
+                var groundedLike = IsOnFloor() || _slideGroundGraceTimer > 0f;
+                if (!groundedLike || (!IsOnSlope && (_slideTimer <= 0 || signedSpeed < 0.1f)) || !(Input.IsActionPressed("slide") || Input.IsActionPressed("crouch")))
 				{
+					// End slide if airborne, or on flat after timer/low speed, or released
 					_isSliding = false;
-					// clear slide anim flag
 					SetMeta(MetaAnimSlide, false);
+                    FloorSnapLength = 0.1f; // restore default
 				}
 			}
 			else
 			{
-				if (!Mathf.IsZeroApprox(inputX) || !Mathf.IsZeroApprox(inputZ))
+                if (!Mathf.IsZeroApprox(inputX) || !Mathf.IsZeroApprox(inputZ))
 				{
 					var wishDir = (camRight * inputX + camForward * inputZ).Normalized();
+					// Optional: face movement direction. Disabled by default to avoid camera coupling.
+					if (AlignFacingWithMovement && IsOnFloor())
+					{
+						var newYaw = Mathf.RadToDeg(Mathf.Atan2(wishDir[0], wishDir[2]));
+						RotationDegrees = new Vector3(0, newYaw, 0);
+					}
 					var targetSpeed = WalkSpeed * (Input.IsActionPressed("sprint") && CanSprint() ? SprintMultiplier : 1f);
 					var horizontalVel = new Vector3(_velocity[0], 0, _velocity[2]);
 					if (IsOnFloor())
@@ -610,22 +669,30 @@ public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSour
 		_mantleTween.Finished += () => { _isMantling = false; };
 	}
 
-	private void UpdateCamera()
+    private void UpdateCamera()
 	{
-		RotationDegrees = new Vector3(0, _yawDegrees, 0);
+        // If a SpringArm exists, derive yaw from it and do not control a separate camera
+        if (_springArm != null)
+        {
+            // Use the camera's global yaw for movement alignment; do not rotate the player here
+            _yawDegrees = _springArm.GlobalRotationDegrees.Y;
+            return;
+        }
 
-		if (_camera == null) return;
-		var yawRad = Mathf.DegToRad(_yawDegrees);
-		var yawBasis = new Basis(Vector3.Up, yawRad);
-		var forward = (yawBasis * Vector3.Forward).Normalized();
-		var right = forward.Cross(Vector3.Up).Normalized();
-		var pitchRad = Mathf.DegToRad(_pitchDegrees);
-		var camDir = forward.Rotated(right, pitchRad).Normalized();
+        RotationDegrees = new Vector3(0, _yawDegrees, 0);
 
-		var target = GlobalPosition + Vector3.Up * CameraHeight;
-		var camPos = target - camDir * CameraDistance;
-		_camera.GlobalPosition = camPos;
-		_camera.LookAt(target, Vector3.Up);
+        if (_camera == null) return;
+        var yawRad = Mathf.DegToRad(_yawDegrees);
+        var yawBasis = new Basis(Vector3.Up, yawRad);
+        var forward = (yawBasis * Vector3.Forward).Normalized();
+        var right = forward.Cross(Vector3.Up).Normalized();
+        var pitchRad = Mathf.DegToRad(_pitchDegrees);
+        var camDir = forward.Rotated(right, pitchRad).Normalized();
+
+        var target = GlobalPosition + Vector3.Up * CameraHeight;
+        var camPos = target - camDir * CameraDistance;
+        _camera.GlobalPosition = camPos;
+        _camera.LookAt(target, Vector3.Up);
 	}
 
 	private void UpdateSlopeState()

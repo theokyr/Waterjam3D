@@ -33,7 +33,7 @@ public partial class MainMenu : Control, IGameEventHandler<DisplaySettingsEvent>
         }
 
         SetupButton("NewGameButton", OnStartButtonPressed);
-        SetupButton("OptionsButton", OnOptionsButtonPressed);
+        // SetupButton("OptionsButton", OnOptionsButtonPressed);
         SetupButton("QuitButton", OnQuitButtonPressed);
         _menuButtons.GetNode<Button>("NewGameButton")?.GrabFocus();
     }

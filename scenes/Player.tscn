@@ -1,7 +1,10 @@
-[gd_scene load_steps=5 format=3 uid="uid://dv3wpnkfu2gnq"]
+[gd_scene load_steps=8 format=3 uid="uid://dv3wpnkfu2gnq"]
 
 [ext_resource type="Script" uid="uid://cucejagtpldu8" path="res://scripts/core/movement/SimpleThirdPersonController.cs" id="1_657mh"]
-[ext_resource type="Script" uid="uid://dkdlno5p23nlq" path="res://scripts/core/movement/BillboardSpriteController.cs" id="3"]
+[ext_resource type="Script" uid="uid://ds4qwc41rq8wk" path="res://scenes/SpringArmController.cs" id="3_3li8b"]
+[ext_resource type="SpriteFrames" uid="uid://78snytk7wyma" path="res://resources/sprites/player/Player.tres" id="4_frames"]
+[ext_resource type="Script" uid="uid://cfj5qt6suy16b" path="res://scripts/game/AnimatedSpriteAnimationHandler.cs" id="5_hndl"]
+[ext_resource type="Script" uid="uid://ben3frnogp41b" path="res://scripts/game/PlayerAnimationEmitter.cs" id="6_emit"]
 
 [sub_resource type="CapsuleShape3D" id="1"]
 
@@ -13,25 +16,43 @@ height = 1.6
 floor_stop_on_slope = false
 floor_max_angle = 0.5846853
 script = ExtResource("1_657mh")
+WalkSpeed = 8.0
+JumpVelocity = 8.0
+PlayerMaxStamina = 4
+PlayerRechargeSeconds = 2.0
+DashSpeed = 24.0
+WallDetectionDistance = 1.5
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 shape = SubResource("1")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 visible = false
 mesh = SubResource("2")
 
-[node name="Billboard" type="Node3D" parent="."]
-script = ExtResource("3")
-UseColliderGroundAlignment = true
-GroundLocalY = 0.5
-
-[node name="Sprite3D" type="Sprite3D" parent="Billboard"]
-billboard = 1
+[node name="AnimatedSprite3D" type="AnimatedSprite3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.28067613, 0)
+pixel_size = 0.08
+billboard = 2
 texture_filter = 0
+sprite_frames = ExtResource("4_frames")
+animation = &"run"
+frame_progress = 0.5958533
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="AnimationHandler" type="Node" parent="."]
+script = ExtResource("5_hndl")
+AnimatedSpritePath = NodePath("../AnimatedSprite3D")
+
+[node name="AnimationEmitter" type="Node3D" parent="."]
+script = ExtResource("6_emit")
+ControllerPath = NodePath("..")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="."]
+spring_length = 5.1511497
+script = ExtResource("3_3li8b")
+MinVerticalAngle = -0.6981317007977318
+MaxVerticalAngle = 0.17453292519943295
+
+[node name="Camera3D" type="Camera3D" parent="SpringArm3D"]
 physics_interpolation_mode = 1
-transform = Transform3D(1, 0, 0, 0, 0.9063078, 0.42261833, 0, -0.42261833, 0.9063078, 0, 2.058151, 4.4137187)
 current = true
