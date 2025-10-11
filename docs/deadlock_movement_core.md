@@ -664,3 +664,4 @@ With core movement implemented, proceed to:
 4. **Polish** - Camera system, animations, visual effects
 
 This core system provides the foundation for all advanced movement techniques while maintaining the responsive, skill-based feel of Deadlock-style gameplay.
+

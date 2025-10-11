@@ -1013,3 +1013,5 @@ Waterjam3D/
 ```
 
 This implementation provides a complete, production-ready Deadlock-style movement system for Godot that captures the fluid, skill-based locomotion that defines the genre. The modular component design allows for easy customization and character-specific variations while maintaining consistent core mechanics.
+
+

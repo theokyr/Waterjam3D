@@ -1,17 +1,7 @@
-[gd_scene load_steps=4 format=3 uid="uid://movement_ui"]
+[gd_scene load_steps=3 format=3 uid="uid://bd6lq2y36cpgs"]
 
-[ext_resource type="Script" path="res://scripts/ui/MovementUI.cs" id="1_ui_script"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_stamina_bg"]
-bg_color = Color(0.2, 0.2, 0.2, 0.8)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.8, 0.8, 0.8, 1)
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_stamina_fg"]
-bg_color = Color(0.2, 0.8, 0.2, 1)
+[ext_resource type="Script" uid="uid://c6oemf6pnql7h" path="res://scripts/ui/MovementUI.cs" id="1_ui_script"]
+[ext_resource type="Script" uid="uid://cuy0a6liap53d" path="res://scripts/ui/components/StaminaWheel.cs" id="2_sw"]
 
 [node name="MovementUI" type="Control"]
 layout_mode = 3
@@ -29,13 +19,18 @@ offset_bottom = 60.0
 theme_override_font_sizes/font_size = 24
 text = "Speed: 0.00 m/s"
 
-[node name="StaminaBar" type="ProgressBar" parent="."]
-layout_mode = 0
-offset_left = 20.0
-offset_top = 80.0
-offset_right = 220.0
-offset_bottom = 110.0
-theme_override_styles/background = SubResource("StyleBoxFlat_stamina_bg")
-theme_override_styles/fill = SubResource("StyleBoxFlat_stamina_fg")
-value = 100.0
-show_percentage = false
+[node name="CrosshairAnchor" type="Control" parent="."]
+anchors_preset = 0
+offset_left = 462.0
+offset_top = 270.0
+offset_right = 562.0
+offset_bottom = 330.0
+
+[node name="StaminaWheel" type="Control" parent="CrosshairAnchor"]
+anchors_preset = 0
+offset_left = 98.0
+offset_top = 201.0
+offset_right = 218.0
+offset_bottom = 321.0
+script = ExtResource("2_sw")
+ArcSpanDegrees = 45.0

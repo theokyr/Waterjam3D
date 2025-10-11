@@ -671,3 +671,4 @@ MaxAirSpeed = 9f;
 - **Momentum Preservation**: Maintain player intent across state changes
 
 This advanced movement system builds upon the core mechanics to create the fluid, skill-based movement that defines Deadlock-style gameplay. The modular design allows for easy balancing and character-specific variations.
+

@@ -1,32 +1,37 @@
-[gd_scene format=3]
+[gd_scene load_steps=5 format=3 uid="uid://dv3wpnkfu2gnq"]
 
-[ext_resource type="Script" path="res://scripts/game/PlayerEntity.cs" id="1_a0r5n"]
-[ext_resource type="Resource" path="res://resources/DefaultPlayerParams.tres" id="2_params"]
+[ext_resource type="Script" uid="uid://cucejagtpldu8" path="res://scripts/core/movement/SimpleThirdPersonController.cs" id="1_657mh"]
+[ext_resource type="Script" uid="uid://dkdlno5p23nlq" path="res://scripts/core/movement/BillboardSpriteController.cs" id="3"]
 
-[sub_resource type="BoxMesh" id="2_2d0g4"]
-size = Vector3(0.6, 1.2, 0.6)
+[sub_resource type="CapsuleShape3D" id="1"]
 
-[sub_resource type="BoxShape3D" id="3_2kqnh"]
-size = Vector3(0.6, 1.2, 0.6)
+[sub_resource type="CapsuleMesh" id="2"]
+radius = 0.4
+height = 1.6
 
-[node name="root" type="Node3D"]
-script = ExtResource("1_a0r5n")
-Params = ExtResource("2_params")
+[node name="Player" type="CharacterBody3D"]
+floor_stop_on_slope = false
+floor_max_angle = 0.5846853
+script = ExtResource("1_657mh")
 
-[node name="CharacterBody3D" type="CharacterBody3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+shape = SubResource("1")
 
-[node name="Mesh" type="MeshInstance3D" parent="CharacterBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
-mesh = SubResource("2_2d0g4")
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
+mesh = SubResource("2")
 
-[node name="Collision" type="CollisionShape3D" parent="CharacterBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
-shape = SubResource("3_2kqnh")
+[node name="Billboard" type="Node3D" parent="."]
+script = ExtResource("3")
+UseColliderGroundAlignment = true
+GroundLocalY = 0.5
 
-[node name="SpringArm3D" type="SpringArm3D" parent="CharacterBody3D"]
-transform = Transform3D(1, 0, 0, 0, 0.980067, 0.198669, 0, -0.198669, 0.980067, 0, 1.6, 0)
-length = 4.5
-collision_mask = 0
+[node name="Sprite3D" type="Sprite3D" parent="Billboard"]
+billboard = 1
+texture_filter = 0
 
-[node name="Camera3D" type="Camera3D" parent="CharacterBody3D/SpringArm3D"]
+[node name="Camera3D" type="Camera3D" parent="."]
+physics_interpolation_mode = 1
+transform = Transform3D(1, 0, 0, 0, 0.9063078, 0.42261833, 0, -0.42261833, 0.9063078, 0, 2.058151, 4.4137187)
 current = true

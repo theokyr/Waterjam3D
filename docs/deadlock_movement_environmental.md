@@ -925,3 +925,4 @@ VentDetectionHeight = 3f;
 - **Vent Systems**: Vertical connections between level sections
 
 This environmental interaction system transforms static level geometry into dynamic movement opportunities, creating the interconnected, skill-based traversal that defines Deadlock-style gameplay.
+

@@ -20,10 +20,14 @@ public partial class PauseMenu : Control,
 
     public override void _Ready()
     {
+        // Ensure this menu receives input while the tree is paused
+        ProcessMode = ProcessModeEnum.WhenPaused;
         _gameService = GetNode<GameService>("/root/GameService");
         InitializePauseMenu();
         Hide();
         _isInitialized = true;
+        // Allow pausing by default in dev scenes even if PlayerSpawnedEvent is not emitted
+        _canPause = true;
     }
 
     public void Refresh()

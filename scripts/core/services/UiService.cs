@@ -3,13 +3,13 @@ using Waterjam.Core.Systems.Console;
 using System.Collections.Generic;
 using System.Linq;
 using Waterjam.Events;
-using Waterjam.Events;
 
 namespace Waterjam.Core.Services;
 
 public partial class UiService : BaseService,
     IGameEventHandler<GameInitializedEvent>,
-    IGameEventHandler<PlayerSpawnedEvent>
+    IGameEventHandler<PlayerSpawnedEvent>,
+    IGameEventHandler<SceneLoadEvent>
 {
     public static readonly string RootScenePath = "res://scenes/root.tscn";
     public static readonly string MainMenuScenePath = "res://scenes/ui/MainMenu.tscn";
@@ -41,7 +41,9 @@ public partial class UiService : BaseService,
             var current = GetTree().CurrentScene;
             var currentPath = current != null ? current.SceneFilePath : string.Empty;
             var isDevScene = !string.IsNullOrEmpty(currentPath) && currentPath.StartsWith("res://scenes/dev/", System.StringComparison.OrdinalIgnoreCase);
-            if (!isDevScene)
+            var isTestScene = !string.IsNullOrEmpty(currentPath) && (currentPath.Contains("Test") || currentPath.Contains("test") || currentPath.Contains("DeadlockMovement"));
+            
+            if (!isDevScene && !isTestScene)
             {
                 if (_mainMenuRequested)
                 {
@@ -59,7 +61,9 @@ public partial class UiService : BaseService,
             }
             else
             {
-                ConsoleSystem.Log("Skipping MainMenu load in dev scene", ConsoleChannel.UI);
+                ConsoleSystem.Log("Skipping MainMenu load in dev/test scene", ConsoleChannel.UI);
+                // For test scenes, show UI immediately and check for existing player
+                CallDeferred(nameof(CheckForExistingPlayer));
             }
         }
         else
@@ -72,6 +76,16 @@ public partial class UiService : BaseService,
     {
         // Show player-related UI elements when player is spawned
         ShowPlayerUI();
+    }
+
+    public void OnGameEvent(SceneLoadEvent eventArgs)
+    {
+        // When a game scene loads (not main menu), check for player and show UI
+        if (!string.Equals(eventArgs.ScenePath, MainMenuScenePath, System.StringComparison.OrdinalIgnoreCase))
+        {
+            ConsoleSystem.Log($"Game scene loaded: {eventArgs.ScenePath}, checking for player", ConsoleChannel.UI);
+            CallDeferred(nameof(CheckForExistingPlayer));
+        }
     }
 
     private void SpawnUiRoot()
@@ -117,6 +131,36 @@ public partial class UiService : BaseService,
 
         // UI elements that should be always accessible
         if (_loadingScreen != null) _alwaysVisibleUI.Add(_loadingScreen);
+
+        // Inject Movement UI under UiRoot so gameplay can always find it
+        try
+        {
+            var existingMovementUi = _uiRoot.GetNodeOrNull<Control>("MovementUI");
+            if (existingMovementUi == null)
+            {
+                var hudScene = ResourceLoader.Load<PackedScene>("res://scenes/MovementUI.tscn");
+                if (hudScene != null)
+                {
+                    var movementUi = hudScene.Instantiate<Control>();
+                    movementUi.Name = "MovementUI";
+                    _uiRoot.AddChild(movementUi);
+                    _playerRelatedUI.Add(movementUi);
+                    ConsoleSystem.Log("MovementUI added under UiRoot", ConsoleChannel.UI);
+                }
+                else
+                {
+                    ConsoleSystem.LogErr("Failed to load MovementUI.tscn", ConsoleChannel.UI);
+                }
+            }
+            else
+            {
+                _playerRelatedUI.Add(existingMovementUi);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            ConsoleSystem.LogErr($"Error adding MovementUI: {ex.Message}", ConsoleChannel.UI);
+        }
 
         // Initially hide all player-related UI elements
         HidePlayerUI();
@@ -166,6 +210,56 @@ public partial class UiService : BaseService,
     public void HideAllPlayerUI()
     {
         HidePlayerUI();
+    }
+
+    private void CheckForExistingPlayer()
+    {
+        // Look for any CharacterBody3D recursively (stamina optional to support monolithic controller)
+        var root = GetTree().Root;
+        var players = new Godot.Collections.Array<Node>();
+        FindPlayersRecursive(root, players);
+        
+        if (players.Count > 0)
+        {
+            var player = players[0] as CharacterBody3D;
+            if (player != null)
+            {
+                ConsoleSystem.Log($"Found player '{player.Name}', binding UI", ConsoleChannel.UI);
+                BindMovementUI(player);
+                ShowPlayerUI();
+            }
+        }
+        else
+        {
+            ConsoleSystem.Log("No player found in scene", ConsoleChannel.UI);
+        }
+    }
+
+    private void FindPlayersRecursive(Node node, Godot.Collections.Array<Node> players)
+    {
+        if (node is CharacterBody3D body)
+        {
+            players.Add(body);
+        }
+        foreach (Node child in node.GetChildren())
+        {
+            FindPlayersRecursive(child, players);
+        }
+    }
+
+    private void BindMovementUI(CharacterBody3D player)
+    {
+        var movementUi = _uiRoot?.GetNodeOrNull<Control>("MovementUI");
+        if (movementUi != null)
+        {
+            var movementUiScript = movementUi as MovementUI;
+            movementUiScript?.SetTargetCharacter(player);
+            ConsoleSystem.Log($"MovementUI bound to player '{player.Name}'", ConsoleChannel.UI);
+        }
+        else
+        {
+            ConsoleSystem.LogWarn("MovementUI not found in UiRoot", ConsoleChannel.UI);
+        }
     }
 
     // Loading screen event handlers

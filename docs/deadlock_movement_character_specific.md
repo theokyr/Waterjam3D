@@ -732,3 +732,5 @@ FlameTrailDamage = 20f;
 - **Combo Potential**: Abilities that chain with movement techniques
 
 This character-specific system creates unique movement identities for different characters while maintaining the core Deadlock movement philosophy of skill-based, fluid locomotion.
+
+

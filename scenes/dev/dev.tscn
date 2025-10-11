@@ -1,43 +1,26 @@
-[gd_scene load_steps=6 format=3 uid="uid://g74owxu4shn2"]
+[gd_scene load_steps=4 format=3 uid="uid://e231ru2ph2qa"]
 
-[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="1_x2s3y"]
+[ext_resource type="PackedScene" uid="uid://dv3wpnkfu2gnq" path="res://scenes/Player.tscn" id="1"]
+[ext_resource type="PackedScene" uid="uid://dx5tw4i5nocyr" path="res://scenes/testLevel/test_level.tscn" id="2_rjxg0"]
+[ext_resource type="PackedScene" uid="uid://c42v2hqvtl72q" path="res://scenes/testLevel/skate_park.tscn" id="3_6re6e"]
 
-[sub_resource type="BoxMesh" id="ground_mesh"]
-size = Vector3(40, 1, 40)
+[node name="TestRoot" type="Node3D"]
 
-[sub_resource type="BoxShape3D" id="ground_shape"]
-size = Vector3(40, 1, 40)
+[node name="Player" parent="." instance=ExtResource("1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 0)
+SlopeSlideAcceleration = 40.0
 
-[sub_resource type="BoxMesh" id="ramp_mesh"]
-size = Vector3(6, 0.5, 12)
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.24183252, -0.050997395, 0.968977, -0.16832948, -0.98127156, -0.09365532, 0.9556057, -0.18575628, 0.22871903, -12.346825, 14.546481, 0)
+shadow_enabled = true
 
-[sub_resource type="BoxShape3D" id="ramp_shape"]
-size = Vector3(6, 0.5, 12)
+[node name="testLevel" parent="." instance=ExtResource("2_rjxg0")]
 
-[node name="Node3D" type="Node3D"]
+[node name="testLevel3" parent="." instance=ExtResource("2_rjxg0")]
+transform = Transform3D(20, 0, 0, 0, 20, 0, 0, 0, 20, 19.655178, 0, 0)
 
-[node name="Player" parent="." instance=ExtResource("1_x2s3y")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+[node name="testLevel4" parent="." instance=ExtResource("2_rjxg0")]
+transform = Transform3D(20, 0, 0, 0, 20, 0, 0, 0, 20, -19.93877, 0, 0)
 
-[node name="Ground" type="StaticBody3D" parent="."]
-
-[node name="GroundMesh" type="MeshInstance3D" parent="Ground"]
-mesh = SubResource("ground_mesh")
-
-[node name="GroundCollision" type="CollisionShape3D" parent="Ground"]
-shape = SubResource("ground_shape")
-
-[node name="Ramp" type="StaticBody3D" parent="."]
-transform = Transform3D(0.965926, 0, -0.258819, 0, 1, 0, 0.258819, 0, 0.965926, 6, 0.25, -3)
-
-[node name="RampMesh" type="MeshInstance3D" parent="Ramp"]
-mesh = SubResource("ramp_mesh")
-
-[node name="RampCollision" type="CollisionShape3D" parent="Ramp"]
-shape = SubResource("ramp_shape")
-
-[node name="Sun" type="DirectionalLight3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, -0.7265267, 0.68713826, 0, -0.68713826, -0.7265267, 0, 4.370678, 0)
-
-[node name="FillLight" type="OmniLight3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 3, 4)
+[node name="Slope_test" parent="." instance=ExtResource("3_6re6e")]
+transform = Transform3D(20, 0, 0, 0, 20, 0, 0, 0, 20, -36.237076, 0, 89.51846)

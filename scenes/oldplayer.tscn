@@ -1,0 +1,41 @@
+[gd_scene load_steps=6 format=3 uid="uid://bssoqso1y2e2b"]
+
+[ext_resource type="Script" uid="uid://corxmev1b24ji" path="res://scripts/game/PlayerEntity.cs" id="1_a0r5n"]
+[ext_resource type="Resource" path="res://resources/DefaultPlayerParams.tres" id="2_params"]
+[ext_resource type="Script" uid="uid://dkdlno5p23nlq" path="res://scripts/core/movement/BillboardSpriteController.cs" id="3_bill"]
+
+[sub_resource type="BoxMesh" id="2_2d0g4"]
+size = Vector3(0.6, 1.2, 0.6)
+
+[sub_resource type="BoxShape3D" id="3_2kqnh"]
+size = Vector3(0.6, 1.2, 0.6)
+
+[node name="root" type="Node3D"]
+script = ExtResource("1_a0r5n")
+Params = ExtResource("2_params")
+
+[node name="CharacterBody3D" type="CharacterBody3D" parent="."]
+
+[node name="Mesh" type="MeshInstance3D" parent="CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+visible = false
+mesh = SubResource("2_2d0g4")
+
+[node name="Collision" type="CollisionShape3D" parent="CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+shape = SubResource("3_2kqnh")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 0.980067, 0.198669, 0, -0.198669, 0.980067, 0, 1.6, 0)
+collision_mask = 0
+
+[node name="Camera3D" type="Camera3D" parent="CharacterBody3D/SpringArm3D"]
+current = true
+
+[node name="Billboard" type="Node3D" parent="CharacterBody3D"]
+script = ExtResource("3_bill")
+GroundLocalY = 0.2
+
+[node name="Sprite3D" type="Sprite3D" parent="CharacterBody3D/Billboard"]
+billboard = 1
+texture_filter = 1

@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="MovementConfig" load_steps=2 format=3 uid="uid://b48ojek71msbx"]
+
+[ext_resource type="Script" uid="uid://defkarwqvssj1" path="res://scripts/core/movement/MovementConfig.cs" id="1_y0kpo"]
+
+[resource]
+script = ExtResource("1_y0kpo")
+MaxWalkableSlopeDegrees = 60.0
+metadata/_custom_type_script = "uid://defkarwqvssj1"

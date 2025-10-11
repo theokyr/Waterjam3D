@@ -1,41 +1,84 @@
+// ARCHIVED: 2025-10-09
+// This monolithic controller has been replaced by the component-based
+// DeadlockMovementPlayer system with MovementConfig resource.
+// Kept for reference only.
+// See: DeadlockMovementPlayer.cs and components in scripts/core/movement/
+
 using Godot;
 using System;
+using Waterjam.UI.Components;
 
-public partial class SimpleThirdPersonController : CharacterBody3D
+public partial class SimpleThirdPersonController : CharacterBody3D, IStaminaSource
 {
+	[ExportGroup("Config")]
+	[Export] public MovementConfig Config { get; set; }
+
+	[ExportGroup("Movement/Ground")]
 	[Export] public float WalkSpeed { get; set; } = 6.0f;
 	[Export] public float SprintMultiplier { get; set; } = 1.5f;
 	[Export] public float Acceleration { get; set; } = 16.0f;
+
+	[ExportGroup("Movement/Physics")]
 	[Export] public float Gravity { get; set; } = 24.0f;
+
+	[ExportGroup("Jumping")]
 	[Export] public float JumpVelocity { get; set; } = 6.5f;
+
+	[ExportGroup("Camera")]
 	[Export] public float MouseSensitivity { get; set; } = 0.12f;
 	[Export] public float CameraDistance { get; set; } = 4.5f;
 	[Export] public float CameraHeight { get; set; } = 1.8f;
 	[Export] public float MinPitchDeg { get; set; } = -60f;
 	[Export] public float MaxPitchDeg { get; set; } = 80f;
 
+	// Lightweight stamina (for UI only when StaminaComponent absent)
+	[ExportGroup("Stamina (Lightweight)")]
+	[Export] public int PlayerMaxStamina { get; set; } = 3;
+	[Export] public float PlayerRechargeSeconds { get; set; } = 3.0f;
+	private int _lwCharges;
+	private float _lwTimer;
+	private int _lastLoggedCharges = int.MinValue;
+
 	// Dash
+	[ExportGroup("Dash")]
 	[Export] public float DashSpeed { get; set; } = 18f;
 	[Export] public float DashDuration { get; set; } = 0.15f;
 	[Export] public float DashCooldown { get; set; } = 0.8f;
+	[Export] public bool DashConsumesStamina { get; set; } = true;
 	private bool _isDashing;
 	private float _dashTimer;
 	private float _dashCooldownTimer;
 	private Vector3 _dashVelocity;
 
 	// Slide
+	[ExportGroup("Slide")]
 	[Export] public float SlideDuration { get; set; } = 0.7f;
 	[Export] public float MinSlideSpeed { get; set; } = 5f;
 	[Export] public float SlideFriction { get; set; } = 6f;
+	[Export] public float MaxWalkableSlopeDegrees { get; set; } = 40f;
+	[Export] public float SlopeSlideAcceleration { get; set; } = 20f;
 	private bool _isSliding;
 	private float _slideTimer;
 	private Vector3 _slideDir;
+	public bool IsOnSlope { get; private set; }
+	private Vector3 _floorNormal = Vector3.Up;
+	private float _slopeAngleDeg;
+
+	private const string MetaAnimDash = "anim_dash";
+	private const string MetaAnimSlide = "anim_slide";
+	private const string MetaAnimWallJumpTime = "anim_wall_jump_time";
 
 	// Wall jump
+	[ExportGroup("Wall Jump")]
 	[Export] public float WallJumpForce { get; set; } = 8f;
 	[Export] public float WallDetectionDistance { get; set; } = 1.1f;
+	[Export] public float WallNormalYThreshold { get; set; } = 0.5f;
+	[Export] public bool WallJumpConsumesStamina { get; set; } = true;
+	private Vector3 _lastWallNormal = Vector3.Zero;
+	private float _lastWallHitTime;
 
 	// Mantle
+	[ExportGroup("Mantle")]
 	[Export] public float MantleCheckDistance { get; set; } = 1.1f;
 	[Export] public float MantleHeight { get; set; } = 1.2f;
 	[Export] public float MantleDuration { get; set; } = 0.35f;
@@ -44,11 +87,17 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 	private Tween _mantleTween;
 
 	// Air-strafe
+	[ExportGroup("Air Movement")]
 	[Export] public float AirAcceleration { get; set; } = 10f;
 	[Export] public float AirControl { get; set; } = 0.35f;
 	[Export] public float MaxAirSpeed { get; set; } = 8.5f;
+	[Export] public float FastDescentVelocity { get; set; } = -20f;
+	[Export] public float FastDescentDoubleTapWindow { get; set; } = 0.25f;
+	[Export] public bool FastDescentConsumesStamina { get; set; } = true;
+	private float _lastCrouchTapTime;
 
 	// Momentum tuning
+	[ExportGroup("Momentum")]
 	[Export] public float MomentumCarryGround { get; set; } = 0.9f;
 	[Export] public float MomentumCarryAir { get; set; } = 0.95f;
 	[Export] public float DashToSlideWindow { get; set; } = 0.18f;
@@ -56,25 +105,59 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 
 	private Camera3D _camera;
 	private Label _speedLabel;
-	private ProgressBar _staminaBar;
+	private MovementUI _movementUi;
 
 	private float _yawDegrees;
 	private float _pitchDegrees;
 	private Vector3 _velocity;
 
-	private StaminaComponent _stamina;
-	private int _lastShownCharges = -1;
+	private StaminaComponent _stamina; // optional heavy component
 
 	public override void _Ready()
 	{
 		_camera = GetNodeOrNull<Camera3D>("Camera3D");
 		_stamina = GetNodeOrNull<StaminaComponent>("StaminaComponent");
 
-		var ui = GetTree().CurrentScene?.GetNodeOrNull<Node>("MovementUI");
+		// Apply MovementConfig if provided, then propagate to components
+		if (Config != null)
+		{
+			ApplyConfigValues();
+			if (_stamina != null)
+			{
+				_stamina.Config = Config;
+			}
+		}
+		_lwCharges = PlayerMaxStamina;
+		_lwTimer = 0f;
+
+		var ui = GetTree().CurrentScene?.GetNodeOrNull<Control>("MovementUI");
+		if (ui == null)
+		{
+			var ps = GD.Load<PackedScene>("res://scenes/MovementUI.tscn");
+			if (ps != null && GetTree().CurrentScene != null)
+			{
+				ui = ps.Instantiate<Control>();
+				ui.Name = "MovementUI";
+				GetTree().CurrentScene.AddChild(ui);
+			}
+		}
 		if (ui != null)
 		{
 			_speedLabel = ui.GetNodeOrNull<Label>("SpeedLabel");
-			_staminaBar = ui.GetNodeOrNull<ProgressBar>("StaminaBar");
+			(ui as MovementUI)?.SetTargetCharacter(this);
+		}
+
+		// Ensure PauseMenu exists in scene
+		var pause = GetTree().CurrentScene?.GetNodeOrNull<Control>("PauseMenu");
+		if (pause == null)
+		{
+			var pauseScene = GD.Load<PackedScene>("res://scenes/ui/PauseMenu.tscn");
+			if (pauseScene != null && GetTree().CurrentScene != null)
+			{
+				pause = pauseScene.Instantiate<Control>();
+				pause.Name = "PauseMenu";
+				GetTree().CurrentScene.AddChild(pause);
+			}
 		}
 
 		if (_camera == null)
@@ -86,6 +169,114 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 		_yawDegrees = RotationDegrees.Y;
 		_pitchDegrees = 10f;
 		Input.MouseMode = Input.MouseModeEnum.Captured;
+	}
+
+	private void ApplyConfigValues()
+	{
+		// Movement/Ground
+		WalkSpeed = Config.WalkSpeed;
+		SprintMultiplier = Config.SprintMultiplier;
+		Acceleration = Config.Acceleration;
+
+		// Movement/Physics
+		Gravity = Config.Gravity;
+
+		// Jumping
+		JumpVelocity = Config.JumpVelocity;
+
+		// Camera
+		MouseSensitivity = Config.MouseSensitivity;
+		CameraDistance = Config.CameraDistance;
+		CameraHeight = Config.CameraHeight;
+		MinPitchDeg = Config.MinPitchDeg;
+		MaxPitchDeg = Config.MaxPitchDeg;
+
+		// Stamina (lightweight fallback)
+		PlayerMaxStamina = Config.MaxCharges;
+		PlayerRechargeSeconds = Config.RechargeTimeSeconds;
+
+		// Dash
+		DashSpeed = Config.DashSpeed;
+		DashDuration = Config.DashDuration;
+		DashCooldown = Config.DashCooldown;
+		DashConsumesStamina = Config.DashConsumesStamina;
+
+		// Slide
+		SlideDuration = Config.SlideDuration;
+		MinSlideSpeed = Config.MinSlideSpeed;
+		SlideFriction = Config.SlideFriction;
+		MaxWalkableSlopeDegrees = Config.MaxWalkableSlopeDegrees;
+		SlopeSlideAcceleration = Config.SlopeSlideAcceleration;
+
+		// Wall Jump
+		WallJumpForce = Config.WallJumpForce;
+		WallDetectionDistance = Config.WallDetectionDistance;
+		WallNormalYThreshold = Config.WallNormalYThreshold;
+		WallJumpConsumesStamina = Config.WallJumpConsumesStamina;
+
+		// Mantle
+		MantleCheckDistance = Config.MantleCheckDistance;
+		MantleHeight = Config.MantleHeight;
+		MantleDuration = Config.MantleDuration;
+
+		// Air Movement
+		AirAcceleration = Config.AirAcceleration;
+		AirControl = Config.AirControl;
+		MaxAirSpeed = Config.MaxAirSpeed;
+		FastDescentVelocity = Config.FastDescentVelocity;
+		FastDescentDoubleTapWindow = Config.FastDescentDoubleTapWindow;
+		FastDescentConsumesStamina = Config.FastDescentConsumesStamina;
+
+		// Momentum
+		MomentumCarryGround = Config.MomentumCarryGround;
+		MomentumCarryAir = Config.MomentumCarryAir;
+		DashToSlideWindow = Config.DashToSlideWindow;
+	}
+
+	private bool ConsumeStaminaIfEnabled(bool consumeFlag)
+	{
+		if (!consumeFlag) return true;
+		// Prefer heavy component if present; otherwise lightweight charges
+		if (_stamina != null)
+		{
+			return _stamina.TryUseCharge(1);
+		}
+		return TryUseCharge(1);
+	}
+
+	public override void _Process(double delta)
+	{
+		// Lightweight recharge (UI only) when heavy component absent
+		if (_stamina == null && _lwCharges < PlayerMaxStamina)
+		{
+			_lwTimer += (float)delta;
+			if (_lwTimer >= PlayerRechargeSeconds)
+			{
+				_lwTimer -= PlayerRechargeSeconds;
+				_lwCharges = Mathf.Clamp(_lwCharges + 1, 0, PlayerMaxStamina);
+			}
+		}
+	}
+
+	// IStaminaSource implementation (used by StaminaWheel if StaminaComponent missing)
+	public int GetMaxCharges() => _stamina != null ? _stamina.GetMaxCharges() : PlayerMaxStamina;
+	public int GetCurrentCharges() => _stamina != null ? _stamina.GetCurrentCharges() : _lwCharges;
+	public float GetNextChargeProgress01()
+	{
+		if (_stamina != null) return _stamina.GetNextChargeProgress01();
+		if (_lwCharges >= PlayerMaxStamina) return 1f;
+		return Mathf.Clamp(_lwTimer / Mathf.Max(0.0001f, PlayerRechargeSeconds), 0f, 1f);
+	}
+	public bool TryUseCharge(int amount = 1)
+	{
+		if (_stamina != null) return _stamina.TryUseCharge(amount);
+		if (amount <= 0) return true;
+		if (_lwCharges >= amount)
+		{
+			_lwCharges -= amount;
+			return true;
+		}
+		return false;
 	}
 
 	public override void _Input(InputEvent @event)
@@ -132,19 +323,54 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 		// Dash start (requires charge if stamina present)
 		if (!_isDashing && Input.IsActionJustPressed("dash") && _dashCooldownTimer <= 0)
 		{
-			if (_stamina == null || _stamina.TryUseCharge(1))
+			if (!DashConsumesStamina || ConsumeStaminaIfEnabled(DashConsumesStamina))
 			{
 				var dir = (!Mathf.IsZeroApprox(inputX) || !Mathf.IsZeroApprox(inputZ))
 					? (camRight * inputX + camForward * inputZ).Normalized()
 					: camForward;
 				StartDash(dir);
+				SetMeta(MetaAnimDash, true);
+			}
+			else
+			{
+				Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[Stamina] Not enough charges for Dash", Waterjam.Core.Systems.Console.ConsoleChannel.Player);
 			}
 		}
 
-		// Slide start
-		if (!_isSliding && IsOnFloor() && (Input.IsActionJustPressed("slide") || Input.IsActionJustPressed("crouch")) && new Vector3(_velocity[0], 0, _velocity[2]).Length() >= MinSlideSpeed)
+		// Update slope state (uses last frame floor normal if available)
+		UpdateSlopeState();
+
+		// Slide start (grounded). If on a slope, allow crouch/slide to start regardless of current speed
+		if (!_isSliding && IsOnFloor() && (Input.IsActionJustPressed("slide") || Input.IsActionJustPressed("crouch")))
 		{
-			StartSlide(new Vector3(_velocity[0], 0, _velocity[2]).Normalized());
+			var horizontalSpeed = new Vector3(_velocity[0], 0, _velocity[2]).Length();
+			var canStart = IsOnSlope ? true : horizontalSpeed >= MinSlideSpeed;
+			if (canStart)
+			{
+				var dir = new Vector3(_velocity[0], 0, _velocity[2]).Length() > 0.01f
+					? new Vector3(_velocity[0], 0, _velocity[2]).Normalized()
+					: GetDownSlopeDirection();
+				StartSlide(dir);
+				SetMeta(MetaAnimSlide, true);
+			}
+		}
+
+		// Fast descent: double-tap crouch while airborne
+		if (!IsOnFloor() && Input.IsActionJustPressed("crouch"))
+		{
+			var now = (float)Time.GetTicksMsec() * 0.001f;
+			if (now - _lastCrouchTapTime <= FastDescentDoubleTapWindow)
+			{
+				if (!FastDescentConsumesStamina || ConsumeStaminaIfEnabled(FastDescentConsumesStamina))
+				{
+					_velocity[1] = FastDescentVelocity;
+				}
+				else
+				{
+					Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[Stamina] Not enough charges for Fast Descent", Waterjam.Core.Systems.Console.ConsoleChannel.Player);
+				}
+			}
+			_lastCrouchTapTime = now;
 		}
 
 		// Mantle start
@@ -161,6 +387,8 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 			{
 				_isDashing = false;
 				_postDashWindow = DashToSlideWindow;
+				// clear dash anim flag
+				SetMeta(MetaAnimDash, false);
 			}
 		}
 		else
@@ -170,13 +398,26 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 			{
 				_slideTimer -= (float)delta;
 				var speed = new Vector3(_velocity[0], 0, _velocity[2]).Length();
-				speed = Mathf.Max(speed - SlideFriction * (float)delta, MinSlideSpeed * 0.5f);
+				// accelerate down slope if on slope, otherwise apply frictional decay
+				if (IsOnSlope)
+				{
+					var downSlopeDir = GetDownSlopeDirection();
+					// Blend slide direction toward downslope for stability
+					_slideDir = _slideDir.Lerp(downSlopeDir, 0.1f).Normalized();
+					speed += SlopeSlideAcceleration * Mathf.Sin(Mathf.DegToRad(_slopeAngleDeg)) * (float)delta;
+				}
+				else
+				{
+					speed = Mathf.Max(speed - SlideFriction * (float)delta, MinSlideSpeed * 0.5f);
+				}
 				var slideVel = _slideDir * speed;
 				_velocity[0] = slideVel[0];
 				_velocity[2] = slideVel[2];
 				if (_slideTimer <= 0 || !IsOnFloor())
 				{
 					_isSliding = false;
+					// clear slide anim flag
+					SetMeta(MetaAnimSlide, false);
 				}
 			}
 			else
@@ -247,6 +488,13 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 
 		Velocity = _velocity;
 		MoveAndSlide();
+		// Capture floor info after move when grounded
+		if (IsOnFloor())
+		{
+			_floorNormal = GetFloorNormal();
+		}
+		// Capture any wall collisions from this frame
+		CaptureWallCollision();
 
 		UpdateUI();
 	}
@@ -270,21 +518,57 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 	private bool TryWallJump(Vector3 camForward)
 	{
 		if (IsOnFloor()) return false;
-		var from = GlobalPosition + Vector3.Up * 1.0f;
-		var to = from + camForward * WallDetectionDistance;
-		var space = GetWorld3D().DirectSpaceState;
-		var query = PhysicsRayQueryParameters3D.Create(from, to);
-		query.CollideWithAreas = false;
-		query.CollideWithBodies = true;
-		var result = space.IntersectRay(query);
-		if (result.Count > 0)
-		{
-			var normal = (Vector3)result["normal"];
-			var jumpDir = (normal + Vector3.Up).Normalized();
-			_velocity = jumpDir * WallJumpForce;
-			return true;
-		}
-		return false;
+    // Prefer recent collision normal captured after movement
+    if (_lastWallNormal != Vector3.Zero && _lastWallNormal.Dot(Vector3.Up) < WallNormalYThreshold)
+    {
+        if (!WallJumpConsumesStamina || ConsumeStaminaIfEnabled(WallJumpConsumesStamina))
+        {
+            var jumpFromCollision = (_lastWallNormal + Vector3.Up).Normalized();
+            _velocity = jumpFromCollision * WallJumpForce;
+            SetMeta(MetaAnimWallJumpTime, (float)Time.GetTicksMsec() * 0.001f);
+            return true;
+        }
+        else
+        {
+            Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[Stamina] Not enough charges for Wall Jump", Waterjam.Core.Systems.Console.ConsoleChannel.Player);
+            return false;
+        }
+    }
+
+    // Fallback: raycast in a fan around camera forward
+    var origin = GlobalPosition + Vector3.Up * 1.0f;
+    var space = GetWorld3D().DirectSpaceState;
+    var directions = GetWallProbeDirections(camForward);
+    foreach (var dir in directions)
+    {
+        var to = origin + dir * WallDetectionDistance;
+        var query = PhysicsRayQueryParameters3D.Create(origin, to);
+        query.CollideWithAreas = false;
+        query.CollideWithBodies = true;
+        var hit = space.IntersectRay(query);
+        if (hit.Count > 0)
+        {
+            var normal = (Vector3)hit["normal"];
+            if (normal.Dot(Vector3.Up) < WallNormalYThreshold)
+            {
+                if (!WallJumpConsumesStamina || ConsumeStaminaIfEnabled(WallJumpConsumesStamina))
+                {
+                    var jumpDir = (normal + Vector3.Up).Normalized();
+                    _velocity = jumpDir * WallJumpForce;
+                    SetMeta(MetaAnimWallJumpTime, (float)Time.GetTicksMsec() * 0.001f);
+                    _lastWallNormal = normal;
+                    _lastWallHitTime = (float)Time.GetTicksMsec() * 0.001f;
+                    return true;
+                }
+                else
+                {
+                    Waterjam.Core.Systems.Console.ConsoleSystem.LogWarn("[Stamina] Not enough charges for Wall Jump", Waterjam.Core.Systems.Console.ConsoleChannel.Player);
+                    return false;
+                }
+            }
+        }
+    }
+    return false;
 	}
 
 	private void TryMantle(Vector3 camForward)
@@ -344,6 +628,36 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 		_camera.LookAt(target, Vector3.Up);
 	}
 
+	private void UpdateSlopeState()
+	{
+		if (IsOnFloor())
+		{
+			// Use current floor normal when available; may reflect previous frame before MoveAndSlide
+			var n = GetFloorNormal();
+			_floorNormal = n;
+			var dot = Mathf.Clamp(n.Dot(Vector3.Up), -1f, 1f);
+			_slopeAngleDeg = Mathf.RadToDeg(Mathf.Acos(dot));
+			IsOnSlope = _slopeAngleDeg > 2f && _slopeAngleDeg < 89f;
+		}
+		else
+		{
+			IsOnSlope = false;
+			_slopeAngleDeg = 0f;
+		}
+	}
+
+	private Vector3 GetDownSlopeDirection()
+	{
+		// Project global down onto the plane defined by the floor normal, then flatten to horizontal
+		var downslope = (-Vector3.Up).Slide(_floorNormal);
+		var horizontal = new Vector3(downslope[0], 0, downslope[2]);
+		if (horizontal.Length() < 0.001f)
+		{
+			return Vector3.Zero;
+		}
+		return horizontal.Normalized();
+	}
+
 	private bool CanSprint()
 	{
 		return _stamina == null || _stamina.CanSprint();
@@ -356,13 +670,52 @@ public partial class SimpleThirdPersonController : CharacterBody3D
 			var hSpeed = new Vector3(Velocity[0], 0, Velocity[2]).Length();
 			_speedLabel.Text = $"Speed: {hSpeed:F2} m/s";
 		}
-		if (_staminaBar != null && _stamina != null)
+		// StaminaWheel now binds directly to StaminaComponent via MovementUI; add debug logs for charges
+		if (_stamina != null)
 		{
-			// Represent charges on a progress bar: value shows next charge progress, max is max charges
-			_staminaBar.MaxValue = _stamina.GetMaxCharges();
-			var charges = _stamina.GetCurrentCharges();
-			var next = _stamina.GetNextChargeProgress01();
-			_staminaBar.Value = Mathf.Clamp(charges + next, 0, _stamina.GetMaxCharges());
+			int charges = _stamina.GetCurrentCharges();
+			if (charges != _lastLoggedCharges)
+			{
+				GD.Print($"[Stamina] charges={charges}/{_stamina.GetMaxCharges()} progress={_stamina.GetNextChargeProgress01():F2}");
+				_lastLoggedCharges = charges;
+			}
 		}
+	}
+
+	private void CaptureWallCollision()
+	{
+		// Iterate slide collisions from last move
+		var count = GetSlideCollisionCount();
+		for (int i = 0; i < count; i++)
+		{
+			var col = GetSlideCollision(i);
+			var n = col.GetNormal();
+			// Ignore floor-like normals
+			if (n.Dot(Vector3.Up) < WallNormalYThreshold)
+			{
+				_lastWallNormal = n;
+				_lastWallHitTime = (float)Time.GetTicksMsec() * 0.001f;
+				break;
+			}
+		}
+		// Expire after short time window
+		if (_lastWallNormal != Vector3.Zero)
+		{
+			var age = (float)Time.GetTicksMsec() * 0.001f - _lastWallHitTime;
+			if (age > 0.25f) _lastWallNormal = Vector3.Zero;
+		}
+	}
+
+	private Vector3[] GetWallProbeDirections(Vector3 camForward)
+	{
+		var forward = camForward.Normalized();
+		var right = forward.Cross(Vector3.Up).Normalized();
+		var dirs = new Vector3[5];
+		dirs[0] = forward;
+		dirs[1] = (forward.Rotated(Vector3.Up, Mathf.DegToRad(20f))).Normalized();
+		dirs[2] = (forward.Rotated(Vector3.Up, Mathf.DegToRad(-20f))).Normalized();
+		dirs[3] = right;
+		dirs[4] = -right;
+		return dirs;
 	}
 }
